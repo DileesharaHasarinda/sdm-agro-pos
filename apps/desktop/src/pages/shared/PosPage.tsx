@@ -28,7 +28,6 @@ import {
 } from '../../lib/realtimeStock';
 
 import type {
-    RealtimeStockStatus,
     RealtimeStockUpdatedEvent,
 } from '../../lib/realtimeStock';
 
@@ -50,6 +49,214 @@ import type {
 } from '../../types/sale';
 
 const PRODUCT_PAGE_SIZE = 24;
+
+
+const POS_DRAFT_STORAGE_KEY =
+    'sdm-agro-pos:current-sale:v1';
+
+type PosDraftState = {
+    cart: PosCartItem[];
+    saleDiscount: string;
+};
+
+function getEmptyPosDraft(): PosDraftState {
+    return {
+        cart: [],
+        saleDiscount: '0',
+    };
+}
+
+function getPosDraftStorageKey(
+    token:
+        | string
+        | null
+        | undefined,
+): string {
+    const tokenValue =
+        String(
+            token ?? '',
+        ).trim();
+
+    if (!tokenValue) {
+        return `${POS_DRAFT_STORAGE_KEY}:guest`;
+    }
+
+    let hash = 2166136261;
+
+    for (
+        let index = 0;
+        index < tokenValue.length;
+        index += 1
+    ) {
+        hash ^= tokenValue.charCodeAt(
+            index,
+        );
+
+        hash = Math.imul(
+            hash,
+            16777619,
+        );
+    }
+
+    return `${POS_DRAFT_STORAGE_KEY}:${(
+        hash >>> 0
+    ).toString(16)}`;
+}
+
+function loadPosDraft(
+    storageKey: string,
+): PosDraftState {
+    if (
+        typeof window
+        === 'undefined'
+    ) {
+        return getEmptyPosDraft();
+    }
+
+    try {
+        const storedDraft =
+            window.sessionStorage
+                .getItem(
+                    storageKey,
+                );
+
+        if (!storedDraft) {
+            return getEmptyPosDraft();
+        }
+
+        const parsedDraft =
+            JSON.parse(
+                storedDraft,
+            ) as {
+                cart?: unknown;
+                saleDiscount?: unknown;
+            };
+
+        const restoredCart =
+            Array.isArray(
+                parsedDraft.cart,
+            )
+                ? (
+                    parsedDraft.cart as PosCartItem[]
+                )
+                : [];
+
+        const restoredSaleDiscount =
+            typeof parsedDraft
+                .saleDiscount
+                === 'string'
+                ? parsedDraft
+                    .saleDiscount
+                : typeof parsedDraft
+                    .saleDiscount
+                    === 'number'
+                    ? String(
+                        parsedDraft
+                            .saleDiscount,
+                    )
+                    : '0';
+
+        return {
+            cart:
+                restoredCart,
+
+            saleDiscount:
+                restoredSaleDiscount,
+        };
+    } catch (error) {
+        console.warn(
+            'Unable to restore the current POS sale draft.',
+            error,
+        );
+
+        try {
+            window.sessionStorage
+                .removeItem(
+                    storageKey,
+                );
+        } catch {
+            // Ignore storage cleanup failures.
+        }
+
+        return getEmptyPosDraft();
+    }
+}
+
+function savePosDraft(
+    storageKey: string,
+    draft: PosDraftState,
+): void {
+    if (
+        typeof window
+        === 'undefined'
+    ) {
+        return;
+    }
+
+    try {
+        const parsedDiscount =
+            Number(
+                draft.saleDiscount
+                || 0,
+            );
+
+        const hasSaleDiscount =
+            Number.isFinite(
+                parsedDiscount,
+            )
+            && Math.abs(
+                parsedDiscount,
+            ) > 0.0001;
+
+        if (
+            draft.cart.length === 0
+            && !hasSaleDiscount
+        ) {
+            window.sessionStorage
+                .removeItem(
+                    storageKey,
+                );
+
+            return;
+        }
+
+        window.sessionStorage
+            .setItem(
+                storageKey,
+                JSON.stringify(
+                    draft,
+                ),
+            );
+    } catch (error) {
+        console.warn(
+            'Unable to save the current POS sale draft.',
+            error,
+        );
+    }
+}
+
+function removePosDraft(
+    storageKey: string,
+): void {
+    if (
+        typeof window
+        === 'undefined'
+    ) {
+        return;
+    }
+
+    try {
+        window.sessionStorage
+            .removeItem(
+                storageKey,
+            );
+    } catch (error) {
+        console.warn(
+            'Unable to clear the current POS sale draft.',
+            error,
+        );
+    }
+}
 
 const currencyFormatter =
     new Intl.NumberFormat(
@@ -517,24 +724,6 @@ function getBatchStockUsedByCart(
     );
 }
 
-function getRealtimeStatusLabel(
-    status: RealtimeStockStatus,
-): string {
-    switch (status) {
-        case 'connected':
-            return 'Live Stock Connected';
-
-        case 'connecting':
-            return 'Connecting Live Stock';
-
-        case 'error':
-            return 'Live Stock Error';
-
-        case 'disconnected':
-        default:
-            return 'Live Stock Disconnected';
-    }
-}
 
 function getCombinedCartStockError(
     cart: PosCartItem[],
@@ -1171,106 +1360,6 @@ const styles = `
     font-size: 12px !important;
 }
 
-#agro-pos .realtime-status {
-    display: inline-flex !important;
-
-    min-height: 36px !important;
-
-    align-items: center !important;
-
-    gap: 8px !important;
-
-    padding:
-        7px 10px !important;
-
-    color:
-        var(--text-2) !important;
-
-    font-size: 12px !important;
-
-    font-weight: 800 !important;
-
-    white-space: nowrap !important;
-
-    background: #ffffff !important;
-
-    border:
-        1px solid
-        var(--border) !important;
-
-    border-radius: 999px !important;
-}
-
-#agro-pos .realtime-dot {
-    display: block !important;
-
-    width: 9px !important;
-    height: 9px !important;
-
-    flex:
-        0 0 9px !important;
-
-    background: #98a2b3 !important;
-
-    border-radius: 50% !important;
-}
-
-#agro-pos .realtime-status.connected {
-    color:
-        var(--green-900) !important;
-
-    background:
-        var(--green-50) !important;
-
-    border-color:
-        #b8dfc3 !important;
-}
-
-#agro-pos .realtime-status.connected .realtime-dot {
-    background:
-        var(--green-700) !important;
-
-    box-shadow:
-        0 0 0 3px
-        rgba(
-            21,
-            128,
-            61,
-            0.12
-        ) !important;
-}
-
-#agro-pos .realtime-status.connecting {
-    color:
-        var(--amber) !important;
-
-    background:
-        var(--amber-bg) !important;
-
-    border-color:
-        #f0d48f !important;
-}
-
-#agro-pos .realtime-status.connecting .realtime-dot {
-    background: #f79009 !important;
-}
-
-#agro-pos .realtime-status.disconnected,
-#agro-pos .realtime-status.error {
-    color:
-        var(--red) !important;
-
-    background:
-        var(--red-bg) !important;
-
-    border-color:
-        #f3b5af !important;
-}
-
-#agro-pos .realtime-status.disconnected .realtime-dot,
-#agro-pos .realtime-status.error .realtime-dot {
-    background: #d92d20 !important;
-}
 
 #agro-pos .alert {
     display: flex !important;
@@ -3085,6 +3174,32 @@ export default function PosPage() {
             null,
         );
 
+
+    const draftStorageKey =
+        useMemo(
+            () =>
+                getPosDraftStorageKey(
+                    token,
+                ),
+            [token],
+        );
+
+    const [
+        initialDraft,
+    ] = useState<PosDraftState>(
+        () =>
+            loadPosDraft(
+                draftStorageKey,
+            ),
+    );
+
+    const [
+        draftOwnerKey,
+        setDraftOwnerKey,
+    ] = useState(
+        draftStorageKey,
+    );
+
     const loadProductsRef =
         useRef<
             (
@@ -3115,7 +3230,9 @@ export default function PosPage() {
         setCart,
     ] = useState<
         PosCartItem[]
-    >([]);
+    >(
+        initialDraft.cart,
+    );
 
     const [
         selectedProduct,
@@ -3156,7 +3273,9 @@ export default function PosPage() {
     const [
         saleDiscount,
         setSaleDiscount,
-    ] = useState('0');
+    ] = useState(
+        initialDraft.saleDiscount,
+    );
 
     const [
         isLoading,
@@ -3200,12 +3319,6 @@ export default function PosPage() {
         setIsClearCartConfirming,
     ] = useState(false);
 
-    const [
-        realtimeStatus,
-        setRealtimeStatus,
-    ] = useState<
-        RealtimeStockStatus
-    >('disconnected');
 
     const loadCategories =
         useCallback(
@@ -3354,10 +3467,6 @@ export default function PosPage() {
 
     useEffect(() => {
         if (!token) {
-            setRealtimeStatus(
-                'disconnected',
-            );
-
             return;
         }
 
@@ -3376,16 +3485,14 @@ export default function PosPage() {
                                 token,
 
                                 onStatusChange:
-                                    (
-                                        status,
-                                    ) => {
-                                        if (disposed) {
-                                            return;
-                                        }
-
-                                        setRealtimeStatus(
-                                            status,
-                                        );
+                                    () => {
+                                        /*
+                                         * Realtime stock status is intentionally
+                                         * hidden from the POS interface.
+                                         *
+                                         * Stock synchronization still runs in
+                                         * the background.
+                                         */
                                     },
 
                                 onStockUpdated:
@@ -3465,10 +3572,6 @@ export default function PosPage() {
                         return;
                     }
 
-                    setRealtimeStatus(
-                        'error',
-                    );
-
                     console.error(
                         'Unable to start realtime POS stock synchronization.',
                         error,
@@ -3507,6 +3610,73 @@ export default function PosPage() {
         };
     }, [
         searchInput,
+    ]);
+
+    useEffect(() => {
+        if (
+            draftOwnerKey
+            === draftStorageKey
+        ) {
+            return;
+        }
+
+        const restoredDraft =
+            loadPosDraft(
+                draftStorageKey,
+            );
+
+        setCart(
+            restoredDraft.cart,
+        );
+
+        setSaleDiscount(
+            restoredDraft
+                .saleDiscount,
+        );
+
+        setSelectedProduct(
+            null,
+        );
+
+        setIsPaymentOpen(
+            false,
+        );
+
+        setPaymentError('');
+        setCartError('');
+
+        setIsClearCartConfirming(
+            false,
+        );
+
+        setDraftOwnerKey(
+            draftStorageKey,
+        );
+    }, [
+        draftOwnerKey,
+        draftStorageKey,
+    ]);
+
+    useEffect(() => {
+        if (
+            draftOwnerKey
+            !== draftStorageKey
+        ) {
+            return;
+        }
+
+        savePosDraft(
+            draftStorageKey,
+            {
+                cart,
+                saleDiscount,
+            },
+        );
+    }, [
+        cart,
+        saleDiscount,
+        draftOwnerKey,
+        draftStorageKey,
     ]);
 
     useEffect(() => {
@@ -4101,6 +4271,10 @@ export default function PosPage() {
 
     const clearCart =
         (): void => {
+            removePosDraft(
+                draftStorageKey,
+            );
+
             setCart([]);
 
             setSaleDiscount(
@@ -4335,23 +4509,6 @@ export default function PosPage() {
 
                     </div>
 
-                    <div
-                        className={`realtime-status ${realtimeStatus}`}
-                        title={
-                            realtimeStatus
-                                === 'connected'
-                                ? 'Stock changes from other cashier machines are being received automatically.'
-                                : 'Realtime stock synchronization is not currently connected.'
-                        }
-                    >
-                        <span className="realtime-dot" />
-
-                        <span>
-                            {getRealtimeStatusLabel(
-                                realtimeStatus,
-                            )}
-                        </span>
-                    </div>
                 </header>
 
                 {pageError && (

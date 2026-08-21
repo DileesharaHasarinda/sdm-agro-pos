@@ -450,6 +450,11 @@ const adminNavigation: NavigationSection[] = [
                 path: '/admin/pos',
                 icon: 'cart',
             },
+            {
+                label: 'Cashier Shifts',
+                path: '/admin/shifts',
+                icon: 'shift',
+            },
         ],
     },
     {
@@ -554,11 +559,6 @@ const adminNavigation: NavigationSection[] = [
                 label: 'Cashier Accounts',
                 path: '/admin/users',
                 icon: 'users',
-            },
-            {
-                label: 'Cashier Shifts',
-                path: '/admin/shifts',
-                icon: 'shift',
             },
         ],
     },

@@ -1343,10 +1343,7 @@ export default function ShiftRegisterPage() {
     const loadCurrentShift =
         useCallback(
             async (): Promise<void> => {
-                if (
-                    !token
-                    || isAdmin
-                ) {
+                if (!token) {
                     setCurrentShift(null);
 
                     return;
@@ -1379,7 +1376,6 @@ export default function ShiftRegisterPage() {
             },
             [
                 token,
-                isAdmin,
             ],
         );
 
@@ -1422,7 +1418,7 @@ export default function ShiftRegisterPage() {
                     setPageError(
                         error instanceof ApiError
                             ? error.message
-                            : 'Unable to load cashier shifts.',
+                            : 'Unable to load register shifts.',
                     );
                 } finally {
                     setIsLoading(false);
@@ -1511,7 +1507,7 @@ export default function ShiftRegisterPage() {
 
                 setSuccessMessage(
                     response.message
-                    ?? 'Cashier shift opened successfully.',
+                    ?? 'Cash register opened successfully.',
                 );
 
                 setOpeningCash(0);
@@ -1530,7 +1526,7 @@ export default function ShiftRegisterPage() {
                 setFormError(
                     error instanceof ApiError
                         ? error.message
-                        : 'Unable to open the cashier shift.',
+                        : 'Unable to open the cash register.',
                 );
             } finally {
                 setIsSubmitting(false);
@@ -1654,7 +1650,7 @@ export default function ShiftRegisterPage() {
 
             const confirmed =
                 window.confirm(
-                    'Close the current cashier shift? You will need to open a new shift before completing more transactions.',
+                    'Close the current cash register? You will need to open a new register before completing more transactions.',
                 );
 
             if (!confirmed) {
@@ -1683,7 +1679,7 @@ export default function ShiftRegisterPage() {
 
                 setSuccessMessage(
                     response.message
-                    ?? 'Cashier shift closed successfully.',
+                    ?? 'Cash register closed successfully.',
                 );
 
                 setActualCash(0);
@@ -1694,7 +1690,7 @@ export default function ShiftRegisterPage() {
                 setFormError(
                     error instanceof ApiError
                         ? error.message
-                        : 'Unable to close the cashier shift.',
+                        : 'Unable to close the cash register.',
                 );
             } finally {
                 setIsSubmitting(false);
@@ -1744,14 +1740,14 @@ export default function ShiftRegisterPage() {
 
                     <h2>
                         {isAdmin
-                            ? 'Cashier Shifts'
+                            ? 'Cash Register & User Shifts'
                             : 'My Cash Register'}
                     </h2>
 
                     <p>
                         {isAdmin
-                            ? 'Review cashier shifts, closing balances and cash differences.'
-                            : 'Open your shift, manage drawer movements and close the register.'}
+                            ? 'Manage your own register and review all user register history.'
+                            : 'Open your register, manage drawer movements and close the register.'}
                     </p>
                 </div>
 
@@ -1804,529 +1800,527 @@ export default function ShiftRegisterPage() {
                     </div>
                 )}
 
-            {!isAdmin
-                && !currentShift && (
-                    <section className="srg-content-card srg-open-panel">
-                        <header>
-                            <span className="srg-kicker">
-                                Start work
+            {!currentShift && (
+                <section className="srg-content-card srg-open-panel">
+                    <header>
+                        <span className="srg-kicker">
+                            Start work
+                        </span>
+
+                        <h3>
+                            Open Cash Register
+                        </h3>
+
+                        <p>
+                            Count the drawer and
+                            enter the opening cash.
+                        </p>
+                    </header>
+
+                    <div className="srg-open-form">
+                        <label>
+                            <span>
+                                Opening Cash
                             </span>
 
-                            <h3>
-                                Open Cashier Shift
-                            </h3>
-
-                            <p>
-                                Count the drawer and
-                                enter the opening cash.
-                            </p>
-                        </header>
-
-                        <div className="srg-open-form">
-                            <label>
-                                <span>
-                                    Opening Cash
-                                </span>
-
-                                <MoneyInput
-                                    value={
-                                        openingCash
-                                    }
-                                    min={0}
-                                    disabled={
-                                        isSubmitting
-                                    }
-                                    onChange={
-                                        setOpeningCash
-                                    }
-                                    onClearError={() => {
-                                        setFormError('');
-                                    }}
-                                />
-                            </label>
-
-                            <label>
-                                <span>
-                                    Opening Notes
-                                </span>
-
-                                <textarea
-                                    rows={2}
-                                    value={openingNotes}
-                                    disabled={isSubmitting}
-                                    onChange={(event) => {
-                                        setOpeningNotes(
-                                            event
-                                                .target
-                                                .value,
-                                        );
-                                    }}
-                                />
-                            </label>
-
-                            <button
-                                type="button"
-                                className="srg-primary-button"
-                                disabled={isSubmitting}
-                                onClick={() => {
-                                    void handleOpenShift();
+                            <MoneyInput
+                                value={
+                                    openingCash
+                                }
+                                min={0}
+                                disabled={
+                                    isSubmitting
+                                }
+                                onChange={
+                                    setOpeningCash
+                                }
+                                onClearError={() => {
+                                    setFormError('');
                                 }}
-                            >
-                                {isSubmitting
-                                    ? 'Opening...'
-                                    : 'Open Shift'}
-                            </button>
-                        </div>
-                    </section>
-                )}
+                            />
+                        </label>
 
-            {!isAdmin
-                && currentShift && (
-                    <>
-                        <section className="srg-current-banner">
-                            <div>
-                                <span>
-                                    Current Shift
-                                </span>
-
-                                <strong>
-                                    {
-                                        currentShift
-                                            .shift_number
-                                    }
-                                </strong>
-
-                                <small>
-                                    Opened{' '}
-
-                                    {formatDateTime(
-                                        currentShift
-                                            .opened_at,
-                                    )}
-                                </small>
-                            </div>
-
-                            <span className="srg-status-open">
-                                Open
+                        <label>
+                            <span>
+                                Opening Notes
                             </span>
-                        </section>
 
-                        <section className="srg-current-summary">
-                            <article>
-                                <span>
-                                    Opening Cash
-                                </span>
+                            <textarea
+                                rows={2}
+                                value={openingNotes}
+                                disabled={isSubmitting}
+                                onChange={(event) => {
+                                    setOpeningNotes(
+                                        event
+                                            .target
+                                            .value,
+                                    );
+                                }}
+                            />
+                        </label>
 
-                                <strong>
-                                    {currencyFormatter
-                                        .format(
-                                            currentShift
-                                                .opening_cash,
-                                        )}
-                                </strong>
-                            </article>
+                        <button
+                            type="button"
+                            className="srg-primary-button"
+                            disabled={isSubmitting}
+                            onClick={() => {
+                                void handleOpenShift();
+                            }}
+                        >
+                            {isSubmitting
+                                ? 'Opening...'
+                                : 'Open Register'}
+                        </button>
+                    </div>
+                </section>
+            )}
 
-                            <article>
-                                <span>
-                                    Cash Collected
-                                </span>
+            {currentShift && (
+                <>
+                    <section className="srg-current-banner">
+                        <div>
+                            <span>
+                                Current Register
+                            </span>
 
-                                <strong>
-                                    {currencyFormatter
-                                        .format(
-                                            currentShift
-                                                .totals
-                                                .cash_collections,
-                                        )}
-                                </strong>
-                            </article>
+                            <strong>
+                                {
+                                    currentShift
+                                        .shift_number
+                                }
+                            </strong>
 
-                            <article>
-                                <span>
-                                    Cash Refunds
-                                </span>
+                            <small>
+                                Opened{' '}
 
-                                <strong className="srg-negative">
-                                    {currencyFormatter
-                                        .format(
-                                            currentShift
-                                                .totals
-                                                .cash_refunds,
-                                        )}
-                                </strong>
-                            </article>
+                                {formatDateTime(
+                                    currentShift
+                                        .opened_at,
+                                )}
+                            </small>
+                        </div>
 
-                            <article>
-                                <span>
-                                    Cash In
-                                </span>
+                        <span className="srg-status-open">
+                            Open
+                        </span>
+                    </section>
 
-                                <strong className="srg-positive">
-                                    {currencyFormatter
-                                        .format(
-                                            currentShift
-                                                .totals
-                                                .cash_in,
-                                        )}
-                                </strong>
-                            </article>
+                    <section className="srg-current-summary">
+                        <article>
+                            <span>
+                                Opening Cash
+                            </span>
 
-                            <article>
-                                <span>
-                                    Cash Out
-                                </span>
+                            <strong>
+                                {currencyFormatter
+                                    .format(
+                                        currentShift
+                                            .opening_cash,
+                                    )}
+                            </strong>
+                        </article>
 
-                                <strong className="srg-negative">
-                                    {currencyFormatter
-                                        .format(
-                                            currentShift
-                                                .totals
-                                                .cash_out,
-                                        )}
-                                </strong>
-                            </article>
+                        <article>
+                            <span>
+                                Cash Collected
+                            </span>
 
-                            <article>
-                                <span>
-                                    Expected Cash
-                                </span>
-
-                                <strong>
-                                    {currencyFormatter
-                                        .format(
-                                            currentShift
-                                                .expected_cash,
-                                        )}
-                                </strong>
-                            </article>
-
-                            <article>
-                                <span>
-                                    Sales
-                                </span>
-
-                                <strong>
-                                    {
+                            <strong>
+                                {currencyFormatter
+                                    .format(
                                         currentShift
                                             .totals
-                                            .sales_count
-                                    }
-                                </strong>
+                                            .cash_collections,
+                                    )}
+                            </strong>
+                        </article>
 
-                                <small>
-                                    {currencyFormatter
-                                        .format(
-                                            currentShift
-                                                .totals
-                                                .sales_total,
-                                        )}
-                                </small>
-                            </article>
+                        <article>
+                            <span>
+                                Cash Refunds
+                            </span>
 
-                            <article>
-                                <span>
-                                    Due Created
+                            <strong className="srg-negative">
+                                {currencyFormatter
+                                    .format(
+                                        currentShift
+                                            .totals
+                                            .cash_refunds,
+                                    )}
+                            </strong>
+                        </article>
+
+                        <article>
+                            <span>
+                                Cash In
+                            </span>
+
+                            <strong className="srg-positive">
+                                {currencyFormatter
+                                    .format(
+                                        currentShift
+                                            .totals
+                                            .cash_in,
+                                    )}
+                            </strong>
+                        </article>
+
+                        <article>
+                            <span>
+                                Cash Out
+                            </span>
+
+                            <strong className="srg-negative">
+                                {currencyFormatter
+                                    .format(
+                                        currentShift
+                                            .totals
+                                            .cash_out,
+                                    )}
+                            </strong>
+                        </article>
+
+                        <article>
+                            <span>
+                                Expected Cash
+                            </span>
+
+                            <strong>
+                                {currencyFormatter
+                                    .format(
+                                        currentShift
+                                            .expected_cash,
+                                    )}
+                            </strong>
+                        </article>
+
+                        <article>
+                            <span>
+                                Sales
+                            </span>
+
+                            <strong>
+                                {
+                                    currentShift
+                                        .totals
+                                        .sales_count
+                                }
+                            </strong>
+
+                            <small>
+                                {currencyFormatter
+                                    .format(
+                                        currentShift
+                                            .totals
+                                            .sales_total,
+                                    )}
+                            </small>
+                        </article>
+
+                        <article>
+                            <span>
+                                Due Created
+                            </span>
+
+                            <strong>
+                                {currencyFormatter
+                                    .format(
+                                        currentShift
+                                            .totals
+                                            .due_created,
+                                    )}
+                            </strong>
+                        </article>
+                    </section>
+
+                    <section className="srg-action-grid">
+                        <article className="srg-content-card">
+                            <header className="srg-card-heading">
+                                <span className="srg-kicker">
+                                    Drawer movement
                                 </span>
 
-                                <strong>
-                                    {currencyFormatter
-                                        .format(
-                                            currentShift
-                                                .totals
-                                                .due_created,
-                                        )}
-                                </strong>
-                            </article>
-                        </section>
+                                <h3>
+                                    Cash In / Cash Out
+                                </h3>
+                            </header>
 
-                        <section className="srg-action-grid">
-                            <article className="srg-content-card">
-                                <header className="srg-card-heading">
-                                    <span className="srg-kicker">
-                                        Drawer movement
+                            <div className="srg-movement-form">
+                                <label>
+                                    <span>
+                                        Type
                                     </span>
 
-                                    <h3>
-                                        Cash In / Cash Out
-                                    </h3>
-                                </header>
-
-                                <div className="srg-movement-form">
-                                    <label>
-                                        <span>
-                                            Type
-                                        </span>
-
-                                        <select
-                                            value={
-                                                movementType
-                                            }
-                                            disabled={
-                                                isSubmitting
-                                            }
-                                            onChange={(event) => {
-                                                setMovementType(
-                                                    parseMovementType(
-                                                        event
-                                                            .target
-                                                            .value,
-                                                    ),
-                                                );
-                                            }}
-                                        >
-                                            <option value="cash_in">
-                                                Cash In
-                                            </option>
-
-                                            <option value="cash_out">
-                                                Cash Out
-                                            </option>
-                                        </select>
-                                    </label>
-
-                                    <label>
-                                        <span>
-                                            Reason
-                                        </span>
-
-                                        <select
-                                            value={
-                                                movementReason
-                                            }
-                                            disabled={
-                                                isSubmitting
-                                            }
-                                            onChange={(event) => {
-                                                setMovementReason(
-                                                    parseMovementReason(
-                                                        event
-                                                            .target
-                                                            .value,
-                                                    ),
-                                                );
-                                            }}
-                                        >
-                                            <option value="cash_float">
-                                                Additional Float
-                                            </option>
-
-                                            <option value="cash_drop">
-                                                Cash Drop
-                                            </option>
-
-                                            <option value="petty_cash">
-                                                Petty Cash
-                                            </option>
-
-                                            <option value="expense">
-                                                Expense
-                                            </option>
-
-                                            <option value="deposit">
-                                                Deposit
-                                            </option>
-
-                                            <option value="withdrawal">
-                                                Withdrawal
-                                            </option>
-
-                                            <option value="other">
-                                                Other
-                                            </option>
-                                        </select>
-                                    </label>
-
-                                    <label>
-                                        <span>
-                                            Amount
-                                        </span>
-
-                                        <MoneyInput
-                                            value={
-                                                movementAmount
-                                            }
-                                            min={0}
-                                            disabled={
-                                                isSubmitting
-                                            }
-                                            onChange={
-                                                setMovementAmount
-                                            }
-                                            onClearError={() => {
-                                                setFormError('');
-                                            }}
-                                        />
-                                    </label>
-
-                                    <label className="srg-wide-field">
-                                        <span>
-                                            Description
-                                        </span>
-
-                                        <input
-                                            value={
-                                                movementDescription
-                                            }
-                                            disabled={
-                                                isSubmitting
-                                            }
-                                            onChange={(event) => {
-                                                setMovementDescription(
+                                    <select
+                                        value={
+                                            movementType
+                                        }
+                                        disabled={
+                                            isSubmitting
+                                        }
+                                        onChange={(event) => {
+                                            setMovementType(
+                                                parseMovementType(
                                                     event
                                                         .target
                                                         .value,
-                                                );
-                                            }}
-                                        />
-                                    </label>
-
-                                    <label className="srg-wide-field">
-                                        <span>
-                                            Reference Number
-                                        </span>
-
-                                        <input
-                                            value={
-                                                movementReference
-                                            }
-                                            disabled={
-                                                isSubmitting
-                                            }
-                                            onChange={(event) => {
-                                                setMovementReference(
-                                                    event
-                                                        .target
-                                                        .value,
-                                                );
-                                            }}
-                                        />
-                                    </label>
-
-                                    <button
-                                        type="button"
-                                        className="srg-secondary-button srg-wide-field"
-                                        disabled={isSubmitting}
-                                        onClick={() => {
-                                            void handleRecordMovement();
+                                                ),
+                                            );
                                         }}
                                     >
-                                        Record Cash Movement
-                                    </button>
-                                </div>
-                            </article>
+                                        <option value="cash_in">
+                                            Cash In
+                                        </option>
 
-                            <article className="srg-content-card">
-                                <header className="srg-card-heading">
-                                    <span className="srg-kicker">
-                                        End work
+                                        <option value="cash_out">
+                                            Cash Out
+                                        </option>
+                                    </select>
+                                </label>
+
+                                <label>
+                                    <span>
+                                        Reason
                                     </span>
 
-                                    <h3>
-                                        Close Cash Register
-                                    </h3>
-                                </header>
-
-                                <div className="srg-close-form">
-                                    <div className="srg-expected-box">
-                                        <span>
-                                            Expected Cash
-                                        </span>
-
-                                        <strong>
-                                            {currencyFormatter
-                                                .format(
-                                                    currentShift
-                                                        .expected_cash,
-                                                )}
-                                        </strong>
-                                    </div>
-
-                                    <label>
-                                        <span>
-                                            Actual Counted Cash
-                                        </span>
-
-                                        <MoneyInput
-                                            value={
-                                                actualCash
-                                            }
-                                            min={0}
-                                            disabled={
-                                                isSubmitting
-                                            }
-                                            onChange={
-                                                setActualCash
-                                            }
-                                            onClearError={() => {
-                                                setFormError('');
-                                            }}
-                                        />
-                                    </label>
-
-                                    <div className="srg-difference-preview">
-                                        <span>
-                                            Difference
-                                        </span>
-
-                                        <strong
-                                            className={
-                                                actualCash
-                                                    - currentShift
-                                                        .expected_cash
-                                                    >= 0
-                                                    ? 'srg-positive'
-                                                    : 'srg-negative'
-                                            }
-                                        >
-                                            {currencyFormatter
-                                                .format(
-                                                    actualCash
-                                                    - currentShift
-                                                        .expected_cash,
-                                                )}
-                                        </strong>
-                                    </div>
-
-                                    <label>
-                                        <span>
-                                            Closing Notes
-                                        </span>
-
-                                        <textarea
-                                            rows={3}
-                                            value={
-                                                closingNotes
-                                            }
-                                            disabled={
-                                                isSubmitting
-                                            }
-                                            onChange={(event) => {
-                                                setClosingNotes(
+                                    <select
+                                        value={
+                                            movementReason
+                                        }
+                                        disabled={
+                                            isSubmitting
+                                        }
+                                        onChange={(event) => {
+                                            setMovementReason(
+                                                parseMovementReason(
                                                     event
                                                         .target
                                                         .value,
-                                                );
-                                            }}
-                                        />
-                                    </label>
-
-                                    <button
-                                        type="button"
-                                        className="srg-close-shift-button"
-                                        disabled={isSubmitting}
-                                        onClick={() => {
-                                            void handleCloseShift();
+                                                ),
+                                            );
                                         }}
                                     >
-                                        {isSubmitting
-                                            ? 'Closing...'
-                                            : 'Close Shift'}
-                                    </button>
+                                        <option value="cash_float">
+                                            Additional Float
+                                        </option>
+
+                                        <option value="cash_drop">
+                                            Cash Drop
+                                        </option>
+
+                                        <option value="petty_cash">
+                                            Petty Cash
+                                        </option>
+
+                                        <option value="expense">
+                                            Expense
+                                        </option>
+
+                                        <option value="deposit">
+                                            Deposit
+                                        </option>
+
+                                        <option value="withdrawal">
+                                            Withdrawal
+                                        </option>
+
+                                        <option value="other">
+                                            Other
+                                        </option>
+                                    </select>
+                                </label>
+
+                                <label>
+                                    <span>
+                                        Amount
+                                    </span>
+
+                                    <MoneyInput
+                                        value={
+                                            movementAmount
+                                        }
+                                        min={0}
+                                        disabled={
+                                            isSubmitting
+                                        }
+                                        onChange={
+                                            setMovementAmount
+                                        }
+                                        onClearError={() => {
+                                            setFormError('');
+                                        }}
+                                    />
+                                </label>
+
+                                <label className="srg-wide-field">
+                                    <span>
+                                        Description
+                                    </span>
+
+                                    <input
+                                        value={
+                                            movementDescription
+                                        }
+                                        disabled={
+                                            isSubmitting
+                                        }
+                                        onChange={(event) => {
+                                            setMovementDescription(
+                                                event
+                                                    .target
+                                                    .value,
+                                            );
+                                        }}
+                                    />
+                                </label>
+
+                                <label className="srg-wide-field">
+                                    <span>
+                                        Reference Number
+                                    </span>
+
+                                    <input
+                                        value={
+                                            movementReference
+                                        }
+                                        disabled={
+                                            isSubmitting
+                                        }
+                                        onChange={(event) => {
+                                            setMovementReference(
+                                                event
+                                                    .target
+                                                    .value,
+                                            );
+                                        }}
+                                    />
+                                </label>
+
+                                <button
+                                    type="button"
+                                    className="srg-secondary-button srg-wide-field"
+                                    disabled={isSubmitting}
+                                    onClick={() => {
+                                        void handleRecordMovement();
+                                    }}
+                                >
+                                    Record Cash Movement
+                                </button>
+                            </div>
+                        </article>
+
+                        <article className="srg-content-card">
+                            <header className="srg-card-heading">
+                                <span className="srg-kicker">
+                                    End work
+                                </span>
+
+                                <h3>
+                                    Close Cash Register
+                                </h3>
+                            </header>
+
+                            <div className="srg-close-form">
+                                <div className="srg-expected-box">
+                                    <span>
+                                        Expected Cash
+                                    </span>
+
+                                    <strong>
+                                        {currencyFormatter
+                                            .format(
+                                                currentShift
+                                                    .expected_cash,
+                                            )}
+                                    </strong>
                                 </div>
-                            </article>
-                        </section>
-                    </>
-                )}
+
+                                <label>
+                                    <span>
+                                        Actual Counted Cash
+                                    </span>
+
+                                    <MoneyInput
+                                        value={
+                                            actualCash
+                                        }
+                                        min={0}
+                                        disabled={
+                                            isSubmitting
+                                        }
+                                        onChange={
+                                            setActualCash
+                                        }
+                                        onClearError={() => {
+                                            setFormError('');
+                                        }}
+                                    />
+                                </label>
+
+                                <div className="srg-difference-preview">
+                                    <span>
+                                        Difference
+                                    </span>
+
+                                    <strong
+                                        className={
+                                            actualCash
+                                                - currentShift
+                                                    .expected_cash
+                                                >= 0
+                                                ? 'srg-positive'
+                                                : 'srg-negative'
+                                        }
+                                    >
+                                        {currencyFormatter
+                                            .format(
+                                                actualCash
+                                                - currentShift
+                                                    .expected_cash,
+                                            )}
+                                    </strong>
+                                </div>
+
+                                <label>
+                                    <span>
+                                        Closing Notes
+                                    </span>
+
+                                    <textarea
+                                        rows={3}
+                                        value={
+                                            closingNotes
+                                        }
+                                        disabled={
+                                            isSubmitting
+                                        }
+                                        onChange={(event) => {
+                                            setClosingNotes(
+                                                event
+                                                    .target
+                                                    .value,
+                                            );
+                                        }}
+                                    />
+                                </label>
+
+                                <button
+                                    type="button"
+                                    className="srg-close-shift-button"
+                                    disabled={isSubmitting}
+                                    onClick={() => {
+                                        void handleCloseShift();
+                                    }}
+                                >
+                                    {isSubmitting
+                                        ? 'Closing...'
+                                        : 'Close Register'}
+                                </button>
+                            </div>
+                        </article>
+                    </section>
+                </>
+            )}
 
             <section className="srg-history-summary">
                 <article>
@@ -2387,7 +2381,7 @@ export default function ShiftRegisterPage() {
                     <input
                         type="search"
                         value={searchInput}
-                        placeholder="Search shift number or cashier..."
+                        placeholder="Search shift number or register owner..."
                         onChange={(event) => {
                             setSearchInput(
                                 event.target.value,
@@ -2493,7 +2487,7 @@ export default function ShiftRegisterPage() {
                         <thead>
                             <tr>
                                 <th>Shift</th>
-                                <th>Cashier</th>
+                                <th>Register Owner</th>
                                 <th>Opened</th>
                                 <th>Closed</th>
                                 <th>Sales</th>
@@ -2513,7 +2507,7 @@ export default function ShiftRegisterPage() {
                                         colSpan={11}
                                         className="srg-table-state"
                                     >
-                                        Loading cashier shifts...
+                                        Loading register shifts...
                                     </td>
                                 </tr>
                             ) : shifts.length
@@ -2523,7 +2517,7 @@ export default function ShiftRegisterPage() {
                                         colSpan={11}
                                         className="srg-table-state"
                                     >
-                                        No cashier shifts found.
+                                        No register shifts found.
                                     </td>
                                 </tr>
                             ) : (

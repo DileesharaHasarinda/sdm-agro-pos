@@ -12,7 +12,6 @@ use App\Models\Sale;
 use App\Models\SalePayment;
 use App\Models\SaleReturn;
 use App\Models\User;
-use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,6 +21,12 @@ use Illuminate\Validation\ValidationException;
 
 class CashierShiftController extends Controller
 {
+    /*
+     * =========================================================
+     * CURRENT CASH REGISTER
+     * =========================================================
+     */
+
     public function current(
         Request $request,
     ): JsonResponse {
@@ -35,11 +40,19 @@ class CashierShiftController extends Controller
             ], 401);
         }
 
-        if (! $user->isCashier()) {
+        /*
+         * Both Admin and Cashier can have
+         * their own Cash Register.
+         */
+        if (
+            ! $this->canUseCashRegister(
+                $user,
+            )
+        ) {
             return response()->json([
-                'data' =>
-                null,
-            ]);
+                'message' =>
+                'You are not allowed to access the cash register.',
+            ], 403);
         }
 
         $shift =
@@ -52,7 +65,12 @@ class CashierShiftController extends Controller
                 'status',
                 CashierShift::STATUS_OPEN,
             )
-            ->latest('opened_at')
+            ->latest(
+                'opened_at',
+            )
+            ->latest(
+                'id',
+            )
             ->first();
 
         return response()->json([
@@ -65,6 +83,12 @@ class CashierShiftController extends Controller
                 : null,
         ]);
     }
+
+    /*
+     * =========================================================
+     * CASH REGISTER HISTORY
+     * =========================================================
+     */
 
     public function index(
         Request $request,
@@ -79,66 +103,92 @@ class CashierShiftController extends Controller
             ], 401);
         }
 
-        $validated = $request->validate([
-            'search' => [
-                'nullable',
-                'string',
-                'max:160',
-            ],
+        if (
+            ! $this->canUseCashRegister(
+                $user,
+            )
+        ) {
+            return response()->json([
+                'message' =>
+                'You are not allowed to access cash register history.',
+            ], 403);
+        }
 
-            'cashier_id' => [
-                'nullable',
-                'integer',
-                'exists:users,id',
-            ],
+        $validated =
+            $request->validate([
+                'search' => [
+                    'nullable',
+                    'string',
+                    'max:160',
+                ],
 
-            'status' => [
-                'nullable',
+                /*
+                 * Admin can filter register history
+                 * by user.
+                 */
+                'cashier_id' => [
+                    'nullable',
+                    'integer',
+                    'exists:users,id',
+                ],
 
-                Rule::in([
-                    'all',
-                    CashierShift::STATUS_OPEN,
-                    CashierShift::STATUS_CLOSED,
-                ]),
-            ],
+                'status' => [
+                    'nullable',
 
-            'date_from' => [
-                'nullable',
-                'date_format:Y-m-d',
-            ],
+                    Rule::in([
+                        'all',
+                        CashierShift::STATUS_OPEN,
+                        CashierShift::STATUS_CLOSED,
+                    ]),
+                ],
 
-            'date_to' => [
-                'nullable',
-                'date_format:Y-m-d',
-                'after_or_equal:date_from',
-            ],
+                'date_from' => [
+                    'nullable',
+                    'date_format:Y-m-d',
+                ],
 
-            'page' => [
-                'nullable',
-                'integer',
-                'min:1',
-            ],
+                'date_to' => [
+                    'nullable',
+                    'date_format:Y-m-d',
+                    'after_or_equal:date_from',
+                ],
 
-            'per_page' => [
-                'nullable',
-                'integer',
-                'min:5',
-                'max:100',
-            ],
-        ]);
+                'page' => [
+                    'nullable',
+                    'integer',
+                    'min:1',
+                ],
 
-        $search = trim(
-            (string) (
-                $validated['search']
-                ?? ''
-            ),
-        );
+                'per_page' => [
+                    'nullable',
+                    'integer',
+                    'min:5',
+                    'max:100',
+                ],
+            ]);
 
+        $search =
+            trim(
+                (string) (
+                    $validated['search']
+                    ?? ''
+                ),
+            );
+
+        /*
+         * Cashier:
+         * only their own history.
+         *
+         * Admin:
+         * all history unless cashier_id
+         * is supplied.
+         */
         $cashierId =
             $user->isCashier()
             ? $user->id
             : (
-                $validated['cashier_id'] ?? null
+                $validated['cashier_id']
+                ?? null
             );
 
         $status =
@@ -153,10 +203,11 @@ class CashierShiftController extends Controller
             $validated['date_to']
             ?? null;
 
-        $perPage = (int) (
-            $validated['per_page']
-            ?? 20
-        );
+        $perPage =
+            (int) (
+                $validated['per_page']
+                ?? 20
+            );
 
         $query =
             CashierShift::query()
@@ -169,27 +220,33 @@ class CashierShiftController extends Controller
             ])
             ->when(
                 $cashierId !== null,
+
                 fn(
                     Builder $shiftQuery,
-                ) => $shiftQuery->where(
+                ) =>
+                $shiftQuery->where(
                     'cashier_id',
                     $cashierId,
                 ),
             )
             ->when(
                 $status !== 'all',
+
                 fn(
                     Builder $shiftQuery,
-                ) => $shiftQuery->where(
+                ) =>
+                $shiftQuery->where(
                     'status',
                     $status,
                 ),
             )
             ->when(
                 $dateFrom !== null,
+
                 fn(
                     Builder $shiftQuery,
-                ) => $shiftQuery->whereDate(
+                ) =>
+                $shiftQuery->whereDate(
                     'opened_at',
                     '>=',
                     $dateFrom,
@@ -197,9 +254,11 @@ class CashierShiftController extends Controller
             )
             ->when(
                 $dateTo !== null,
+
                 fn(
                     Builder $shiftQuery,
-                ) => $shiftQuery->whereDate(
+                ) =>
+                $shiftQuery->whereDate(
                     'opened_at',
                     '<=',
                     $dateTo,
@@ -207,13 +266,18 @@ class CashierShiftController extends Controller
             )
             ->when(
                 $search !== '',
+
                 function (
                     Builder $shiftQuery,
-                ) use ($search): void {
+                ) use (
+                    $search,
+                ): void {
                     $shiftQuery->where(
                         function (
                             Builder $searchQuery,
-                        ) use ($search): void {
+                        ) use (
+                            $search,
+                        ): void {
                             $searchQuery
                                 ->where(
                                     'shift_number',
@@ -222,9 +286,12 @@ class CashierShiftController extends Controller
                                 )
                                 ->orWhereHas(
                                     'cashier',
+
                                     function (
                                         Builder $cashierQuery,
-                                    ) use ($search): void {
+                                    ) use (
+                                        $search,
+                                    ): void {
                                         $cashierQuery
                                             ->where(
                                                 'name',
@@ -242,18 +309,27 @@ class CashierShiftController extends Controller
                     );
                 },
             )
-            ->latest('opened_at')
-            ->latest('id');
+            ->latest(
+                'opened_at',
+            )
+            ->latest(
+                'id',
+            );
 
-        $summaryQuery =
-            clone $query;
+        /*
+         * =====================================================
+         * SUMMARY
+         * =====================================================
+         */
 
         $summaryRows =
-            $summaryQuery->get();
+            (clone $query)
+            ->get();
 
         $summary = [
             'total_shifts' =>
-            $summaryRows->count(),
+            $summaryRows
+                ->count(),
 
             'open_shifts' =>
             $summaryRows
@@ -272,20 +348,22 @@ class CashierShiftController extends Controller
                 ->count(),
 
             'total_opening_cash' =>
-            (float) $summaryRows->sum(
-                'opening_cash',
-            ),
+            (float) $summaryRows
+                ->sum(
+                    'opening_cash',
+                ),
 
             'total_expected_cash' =>
-            (float) $summaryRows->sum(
-                fn(
-                    CashierShift $shift,
-                ): float =>
-                $this
-                    ->calculateTotals(
-                        $shift,
-                    )['expected_cash'],
-            ),
+            (float) $summaryRows
+                ->sum(
+                    fn(
+                        CashierShift $shift,
+                    ): float =>
+                    (float) $this
+                        ->calculateTotals(
+                            $shift,
+                        )['expected_cash'],
+                ),
 
             'total_difference' =>
             (float) $summaryRows
@@ -297,6 +375,12 @@ class CashierShiftController extends Controller
                     'cash_difference',
                 ),
         ];
+
+        /*
+         * =====================================================
+         * PAGINATION
+         * =====================================================
+         */
 
         $shifts =
             $query->paginate(
@@ -324,25 +408,37 @@ class CashierShiftController extends Controller
 
             'meta' => [
                 'current_page' =>
-                $shifts->currentPage(),
+                $shifts
+                    ->currentPage(),
 
                 'last_page' =>
-                $shifts->lastPage(),
+                $shifts
+                    ->lastPage(),
 
                 'per_page' =>
-                $shifts->perPage(),
+                $shifts
+                    ->perPage(),
 
                 'total' =>
-                $shifts->total(),
+                $shifts
+                    ->total(),
 
                 'from' =>
-                $shifts->firstItem(),
+                $shifts
+                    ->firstItem(),
 
                 'to' =>
-                $shifts->lastItem(),
+                $shifts
+                    ->lastItem(),
             ],
         ]);
     }
+
+    /*
+     * =========================================================
+     * CASH REGISTER DETAILS
+     * =========================================================
+     */
 
     public function show(
         Request $request,
@@ -359,13 +455,32 @@ class CashierShiftController extends Controller
         }
 
         if (
-            $user->isCashier()
-            && $cashierShift->cashier_id
-            !== $user->id
+            ! $this->canUseCashRegister(
+                $user,
+            )
         ) {
             return response()->json([
                 'message' =>
-                'You cannot view another cashier’s shift.',
+                'You are not allowed to access the cash register.',
+            ], 403);
+        }
+
+        /*
+         * Admin:
+         * can VIEW every register.
+         *
+         * Cashier:
+         * can VIEW only their own register.
+         */
+        if (
+            ! $user->isAdmin()
+            && (int) $cashierShift
+                ->cashier_id
+            !== (int) $user->id
+        ) {
+            return response()->json([
+                'message' =>
+                'You cannot view another user’s cash register.',
             ], 403);
         }
 
@@ -378,26 +493,44 @@ class CashierShiftController extends Controller
         ]);
     }
 
+    /*
+     * =========================================================
+     * OPEN CASH REGISTER
+     * =========================================================
+     */
+
     public function open(
         OpenCashierShiftRequest $request,
     ): JsonResponse {
         $user =
             $request->user();
 
+        if (! $user instanceof User) {
+            return response()->json([
+                'message' =>
+                'Unauthenticated.',
+            ], 401);
+        }
+
+        /*
+         * Both Admin and Cashier
+         * may open their own register.
+         */
         if (
-            ! $user instanceof User
-            || ! $user->isCashier()
+            ! $this->canUseCashRegister(
+                $user,
+            )
         ) {
             return response()->json([
                 'message' =>
-                'Only cashier accounts can open a shift.',
+                'Only admin and cashier accounts can open a cash register.',
             ], 403);
         }
 
         if (! $user->is_active) {
             return response()->json([
                 'message' =>
-                'The cashier account is inactive.',
+                'Your account is inactive.',
             ], 422);
         }
 
@@ -411,8 +544,11 @@ class CashierShiftController extends Controller
                     $validated,
                 ): CashierShift {
                     /*
-                     * Lock the user row to prevent
-                     * two simultaneous open requests.
+                     * Lock user row.
+                     *
+                     * This prevents two simultaneous
+                     * requests opening two registers
+                     * for the same user.
                      */
                     User::query()
                         ->whereKey(
@@ -421,6 +557,10 @@ class CashierShiftController extends Controller
                         ->lockForUpdate()
                         ->firstOrFail();
 
+                    /*
+                     * Check whether this user already
+                     * has an open register.
+                     */
                     $existingShift =
                         CashierShift::query()
                         ->where(
@@ -436,12 +576,25 @@ class CashierShiftController extends Controller
 
                     if ($existingShift) {
                         throw ValidationException::withMessages([
-                                'opening_cash' => [
-                                    'You already have an open cashier shift.',
-                                ],
-                            ]);
+                            'opening_cash' => [
+                                'You already have an open cash register.',
+                            ],
+                        ]);
                     }
 
+                    /*
+                     * IMPORTANT:
+                     *
+                     * Keep cashier_id.
+                     *
+                     * This is your existing database
+                     * column and references users.id.
+                     *
+                     * Therefore:
+                     *
+                     * Cashier user ID -> allowed
+                     * Admin user ID   -> allowed
+                     */
                     $shift =
                         CashierShift::query()
                         ->create([
@@ -464,19 +617,27 @@ class CashierShiftController extends Controller
                             now(),
 
                             'opening_notes' =>
-                            $validated['opening_notes'] ?? null,
+                            $validated['opening_notes']
+                                ?? null,
 
                             'opened_by' =>
                             $user->id,
                         ]);
 
+                    /*
+                     * Generate shift/register number.
+                     */
                     $shift->update([
                         'shift_number' =>
                         sprintf(
                             'SHIFT-%s-%06d',
+
                             $shift
                                 ->opened_at
-                                ->format('Ymd'),
+                                ->format(
+                                    'Ymd',
+                                ),
+
                             $shift->id,
                         ),
                     ]);
@@ -488,7 +649,7 @@ class CashierShiftController extends Controller
 
         return response()->json([
             'message' =>
-            'Cashier shift opened successfully.',
+            'Cash register opened successfully.',
 
             'data' =>
             $this->shiftData(
@@ -498,6 +659,12 @@ class CashierShiftController extends Controller
         ], 201);
     }
 
+    /*
+     * =========================================================
+     * CLOSE CASH REGISTER
+     * =========================================================
+     */
+
     public function close(
         CloseCashierShiftRequest $request,
         CashierShift $cashierShift,
@@ -505,115 +672,175 @@ class CashierShiftController extends Controller
         $user =
             $request->user();
 
-        if (
-            ! $user instanceof User
-            || ! $user->isCashier()
-        ) {
+        if (! $user instanceof User) {
             return response()->json([
                 'message' =>
-                'Only cashier accounts can close their shift.',
-            ], 403);
+                'Unauthenticated.',
+            ], 401);
         }
 
         if (
-            $cashierShift->cashier_id
-            !== $user->id
+            ! $this->canUseCashRegister(
+                $user,
+            )
         ) {
             return response()->json([
                 'message' =>
-                'You cannot close another cashier’s shift.',
+                'Only admin and cashier accounts can close a cash register.',
+            ], 403);
+        }
+
+        /*
+         * IMPORTANT:
+         *
+         * Admin can VIEW another cashier's
+         * register.
+         *
+         * But Admin cannot CLOSE another
+         * cashier's physical drawer.
+         *
+         * Both Admin and Cashier close only
+         * their OWN register.
+         */
+        if (
+            (int) $cashierShift
+                ->cashier_id
+            !== (int) $user->id
+        ) {
+            return response()->json([
+                'message' =>
+                'You can only close your own cash register.',
             ], 403);
         }
 
         $validated =
             $request->validated();
 
-        DB::transaction(
-            function () use (
-                $cashierShift,
-                $validated,
-                $user,
-            ): void {
-                $lockedShift =
-                    CashierShift::query()
-                    ->whereKey(
-                        $cashierShift->id,
-                    )
-                    ->lockForUpdate()
-                    ->firstOrFail();
+        $closedShift =
+            DB::transaction(
+                function () use (
+                    $cashierShift,
+                    $validated,
+                    $user,
+                ): CashierShift {
+                    /*
+                     * Lock the register before closing.
+                     */
+                    $lockedShift =
+                        CashierShift::query()
+                        ->whereKey(
+                            $cashierShift->id,
+                        )
+                        ->lockForUpdate()
+                        ->firstOrFail();
 
-                if (
-                    $lockedShift->status
-                    !== CashierShift::STATUS_OPEN
-                ) {
-                    throw ValidationException::withMessages([
+                    /*
+                     * Re-check ownership after lock.
+                     */
+                    if (
+                        (int) $lockedShift
+                            ->cashier_id
+                        !== (int) $user->id
+                    ) {
+                        throw ValidationException::withMessages([
                             'actual_cash' => [
-                                'This cashier shift is already closed.',
+                                'You can only close your own cash register.',
                             ],
                         ]);
-                }
+                    }
 
-                $totals =
-                    $this->calculateTotals(
-                        $lockedShift,
-                    );
+                    if (
+                        $lockedShift->status
+                        !== CashierShift::STATUS_OPEN
+                    ) {
+                        throw ValidationException::withMessages([
+                            'actual_cash' => [
+                                'This cash register is already closed.',
+                            ],
+                        ]);
+                    }
 
-                $actualCash =
-                    round(
-                        (float) $validated['actual_cash'],
-                        2,
-                    );
+                    /*
+                     * Recalculate final expected cash
+                     * while register row is locked.
+                     */
+                    $totals =
+                        $this->calculateTotals(
+                            $lockedShift,
+                        );
 
-                $expectedCash =
-                    round(
-                        (float) $totals['expected_cash'],
-                        2,
-                    );
+                    $actualCash =
+                        round(
+                            (float) $validated['actual_cash'],
+                            2,
+                        );
 
-                $difference =
-                    round(
-                        $actualCash
-                            - $expectedCash,
-                        2,
-                    );
+                    $expectedCash =
+                        round(
+                            (float) $totals['expected_cash'],
+                            2,
+                        );
 
-                $lockedShift->update([
-                    'status' =>
-                    CashierShift::STATUS_CLOSED,
+                    /*
+                     * Difference:
+                     *
+                     * Positive = Excess
+                     * Negative = Shortage
+                     */
+                    $difference =
+                        round(
+                            $actualCash
+                                - $expectedCash,
+                            2,
+                        );
 
-                    'closed_at' =>
-                    now(),
+                    $lockedShift->update([
+                        'status' =>
+                        CashierShift::STATUS_CLOSED,
 
-                    'expected_cash' =>
-                    $expectedCash,
+                        'closed_at' =>
+                        now(),
 
-                    'actual_cash' =>
-                    $actualCash,
+                        'expected_cash' =>
+                        $expectedCash,
 
-                    'cash_difference' =>
-                    $difference,
+                        'actual_cash' =>
+                        $actualCash,
 
-                    'closing_notes' =>
-                    $validated['closing_notes'] ?? null,
+                        'cash_difference' =>
+                        $difference,
 
-                    'closed_by' =>
-                    $user->id,
-                ]);
-            },
-            3,
-        );
+                        'closing_notes' =>
+                        $validated['closing_notes']
+                            ?? null,
+
+                        'closed_by' =>
+                        $user->id,
+                    ]);
+
+                    return $lockedShift
+                        ->fresh();
+                },
+                3,
+            );
 
         return response()->json([
             'message' =>
-            'Cashier shift closed successfully.',
+            'Cash register closed successfully.',
 
             'data' =>
             $this->shiftData(
-                $cashierShift->fresh(),
+                $closedShift,
                 true,
             ),
         ]);
     }
+
+    /*
+     * =========================================================
+     * MANUAL CASH IN / CASH OUT
+     * =========================================================
+     */
 
     public function storeMovement(
         StoreCashMovementRequest $request,
@@ -622,70 +849,137 @@ class CashierShiftController extends Controller
         $user =
             $request->user();
 
-        if (
-            ! $user instanceof User
-            || ! $user->isCashier()
-        ) {
+        if (! $user instanceof User) {
             return response()->json([
                 'message' =>
-                'Only cashier accounts can record cash movements.',
-            ], 403);
+                'Unauthenticated.',
+            ], 401);
         }
 
         if (
-            $cashierShift->cashier_id
-            !== $user->id
+            ! $this->canUseCashRegister(
+                $user,
+            )
         ) {
             return response()->json([
                 'message' =>
-                'You cannot modify another cashier’s shift.',
+                'Only admin and cashier accounts can record cash movements.',
             ], 403);
         }
 
+        /*
+         * Admin may inspect other registers,
+         * but manual Cash In / Cash Out must
+         * only affect their own drawer.
+         */
         if (
-            $cashierShift->status
-            !== CashierShift::STATUS_OPEN
+            (int) $cashierShift
+                ->cashier_id
+            !== (int) $user->id
         ) {
-            throw ValidationException::withMessages([
-                    'amount' => [
-                        'Cash movements can only be added to an open shift.',
-                    ],
-                ]);
+            return response()->json([
+                'message' =>
+                'You can only modify your own cash register.',
+            ], 403);
         }
 
         $validated =
             $request->validated();
 
+        /*
+         * Use a transaction + row lock.
+         *
+         * This prevents a Cash Out being added
+         * while another request closes the register.
+         */
+        $result =
+            DB::transaction(
+                function () use (
+                    $cashierShift,
+                    $validated,
+                    $user,
+                ): array {
+                    $lockedShift =
+                        CashierShift::query()
+                        ->whereKey(
+                            $cashierShift->id,
+                        )
+                        ->lockForUpdate()
+                        ->firstOrFail();
+
+                    if (
+                        (int) $lockedShift
+                            ->cashier_id
+                        !== (int) $user->id
+                    ) {
+                        throw ValidationException::withMessages([
+                            'amount' => [
+                                'You can only modify your own cash register.',
+                            ],
+                        ]);
+                    }
+
+                    if (
+                        $lockedShift->status
+                        !== CashierShift::STATUS_OPEN
+                    ) {
+                        throw ValidationException::withMessages([
+                            'amount' => [
+                                'Cash movements can only be added to an open cash register.',
+                            ],
+                        ]);
+                    }
+
+                    $movement =
+                        CashRegisterMovement::query()
+                        ->create([
+                            'cashier_shift_id' =>
+                            $lockedShift->id,
+
+                            'movement_type' =>
+                            $validated['movement_type'],
+
+                            'reason' =>
+                            $validated['reason'],
+
+                            'amount' =>
+                            round(
+                                (float) $validated['amount'],
+                                2,
+                            ),
+
+                            'description' =>
+                            $validated['description'],
+
+                            'reference_number' =>
+                            $validated['reference_number']
+                                ?? null,
+
+                            'occurred_at' =>
+                            now(),
+
+                            'created_by' =>
+                            $user->id,
+                        ]);
+
+                    return [
+                        'movement' =>
+                        $movement,
+
+                        'shift' =>
+                        $lockedShift,
+                    ];
+                },
+                3,
+            );
+
+        /** @var CashRegisterMovement $movement */
         $movement =
-            CashRegisterMovement::query()
-            ->create([
-                'cashier_shift_id' =>
-                $cashierShift->id,
+            $result['movement'];
 
-                'movement_type' =>
-                $validated['movement_type'],
-
-                'reason' =>
-                $validated['reason'],
-
-                'amount' =>
-                round(
-                    (float) $validated['amount'],
-                    2,
-                ),
-
-                'description' =>
-                $validated['description'],
-
-                'reference_number' =>
-                $validated['reference_number'] ?? null,
-
-                'occurred_at' =>
-                now(),
-
-                'created_by' =>
-                $user->id,
-            ]);
+        /** @var CashierShift $updatedShift */
+        $updatedShift =
+            $result['shift'];
 
         return response()->json([
             'message' =>
@@ -699,12 +993,20 @@ class CashierShiftController extends Controller
 
                 'shift' =>
                 $this->shiftData(
-                    $cashierShift,
+                    $updatedShift
+                        ->fresh(),
+
                     true,
                 ),
             ],
         ], 201);
     }
+
+    /*
+     * =========================================================
+     * CALCULATE REGISTER TOTALS
+     * =========================================================
+     */
 
     /**
      * @return array<string, mixed>
@@ -724,6 +1026,12 @@ class CashierShiftController extends Controller
             ->copy()
             : now();
 
+        /*
+         * =====================================================
+         * SALES CREATED DURING REGISTER
+         * =====================================================
+         */
+
         $salesQuery =
             Sale::query()
             ->where(
@@ -738,6 +1046,25 @@ class CashierShiftController extends Controller
                 ],
             );
 
+        /*
+         * =====================================================
+         * PAYMENT COLLECTIONS
+         * =====================================================
+         *
+         * SalePayment is the source of truth.
+         *
+         * Because split payments create separate
+         * SalePayment rows:
+         *
+         * Cash          2,000
+         * Card          1,000
+         * Bank          1,000
+         * Cheque        1,000
+         *
+         * Cash Register only receives:
+         *
+         * Rs.2,000
+         */
         $paymentsQuery =
             SalePayment::query()
             ->where(
@@ -752,6 +1079,9 @@ class CashierShiftController extends Controller
                 ],
             );
 
+        /*
+         * Physical cash.
+         */
         $cashCollections =
             (float) (
                 (clone $paymentsQuery)
@@ -759,9 +1089,16 @@ class CashierShiftController extends Controller
                     'payment_method',
                     SalePayment::METHOD_CASH,
                 )
-                ->sum('amount')
+                ->sum(
+                    'amount',
+                )
             );
 
+        /*
+         * Informational only.
+         *
+         * Does NOT affect physical drawer cash.
+         */
         $cardCollections =
             (float) (
                 (clone $paymentsQuery)
@@ -769,9 +1106,16 @@ class CashierShiftController extends Controller
                     'payment_method',
                     SalePayment::METHOD_CARD,
                 )
-                ->sum('amount')
+                ->sum(
+                    'amount',
+                )
             );
 
+        /*
+         * Informational only.
+         *
+         * Does NOT affect physical drawer cash.
+         */
         $bankCollections =
             (float) (
                 (clone $paymentsQuery)
@@ -779,8 +1123,26 @@ class CashierShiftController extends Controller
                     'payment_method',
                     SalePayment::METHOD_BANK_TRANSFER,
                 )
-                ->sum('amount')
+                ->sum(
+                    'amount',
+                )
             );
+
+        /*
+         * IMPORTANT:
+         *
+         * Cheque is intentionally NOT added
+         * to expected cash.
+         *
+         * Cheque is not physical cash inside
+         * the register drawer.
+         */
+
+        /*
+         * =====================================================
+         * CASH REFUNDS
+         * =====================================================
+         */
 
         $cashRefunds =
             (float) SaleReturn::query()
@@ -799,7 +1161,26 @@ class CashierShiftController extends Controller
                         $end,
                     ],
                 )
-                ->sum('refund_amount');
+                ->sum(
+                    'refund_amount',
+                );
+
+        /*
+         * =====================================================
+         * MANUAL / AUTOMATIC REGISTER MOVEMENTS
+         * =====================================================
+         *
+         * Examples of Cash In:
+         *
+         * Cash float
+         * Extra drawer cash
+         *
+         * Examples of Cash Out:
+         *
+         * Petty cash
+         * Expense
+         * Supplier cash payment
+         */
 
         $movementQuery =
             CashRegisterMovement::query()
@@ -815,7 +1196,9 @@ class CashierShiftController extends Controller
                     'movement_type',
                     CashRegisterMovement::TYPE_CASH_IN,
                 )
-                ->sum('amount')
+                ->sum(
+                    'amount',
+                )
             );
 
         $cashOut =
@@ -825,12 +1208,35 @@ class CashierShiftController extends Controller
                     'movement_type',
                     CashRegisterMovement::TYPE_CASH_OUT,
                 )
-                ->sum('amount')
+                ->sum(
+                    'amount',
+                )
             );
 
         $openingCash =
             (float) $shift
                 ->opening_cash;
+
+        /*
+         * =====================================================
+         * EXPECTED PHYSICAL CASH
+         * =====================================================
+         *
+         * Expected Cash =
+         *
+         * Opening Cash
+         * + Cash Collections
+         * + Cash In
+         * - Cash Refunds
+         * - Cash Out
+         *
+         * Supplier Cash Payments are inserted
+         * as cash_out movements by the
+         * CashRegisterService.
+         *
+         * Card / Bank / Cheque do NOT affect
+         * expected physical cash.
+         */
 
         $expectedCash =
             round(
@@ -843,6 +1249,9 @@ class CashierShiftController extends Controller
             );
 
         return [
+            /*
+             * Sales.
+             */
             'sales_count' => (clone $salesQuery)
                 ->count(),
 
@@ -862,6 +1271,9 @@ class CashierShiftController extends Controller
                 )
             ),
 
+            /*
+             * Payment methods.
+             */
             'cash_collections' =>
             round(
                 $cashCollections,
@@ -880,12 +1292,18 @@ class CashierShiftController extends Controller
                 2,
             ),
 
+            /*
+             * Refunds.
+             */
             'cash_refunds' =>
             round(
                 $cashRefunds,
                 2,
             ),
 
+            /*
+             * Register movements.
+             */
             'cash_in' =>
             round(
                 $cashIn,
@@ -898,10 +1316,19 @@ class CashierShiftController extends Controller
                 2,
             ),
 
+            /*
+             * Final expected drawer cash.
+             */
             'expected_cash' =>
             $expectedCash,
         ];
     }
+
+    /*
+     * =========================================================
+     * CASH REGISTER RESPONSE
+     * =========================================================
+     */
 
     /**
      * @return array<string, mixed>
@@ -934,6 +1361,10 @@ class CashierShiftController extends Controller
                     $end,
                 );
 
+        /*
+         * Load register movement history only
+         * when requested.
+         */
         $movements =
             $includeMovements
             ? CashRegisterMovement::query()
@@ -944,8 +1375,12 @@ class CashierShiftController extends Controller
             ->with(
                 'createdBy:id,name,username',
             )
-            ->latest('occurred_at')
-            ->latest('id')
+            ->latest(
+                'occurred_at',
+            )
+            ->latest(
+                'id',
+            )
             ->get()
             ->map(
                 fn(
@@ -956,6 +1391,7 @@ class CashierShiftController extends Controller
                 ),
             )
             ->values()
+
             : collect();
 
         return [
@@ -963,10 +1399,12 @@ class CashierShiftController extends Controller
             $shift->id,
 
             'shift_number' =>
-            $shift->shift_number,
+            $shift
+                ->shift_number,
 
             'status' =>
-            $shift->status,
+            $shift
+                ->status,
 
             'opening_cash' =>
             (float) $shift
@@ -982,6 +1420,13 @@ class CashierShiftController extends Controller
                 ->closed_at
                 ?->toISOString(),
 
+            /*
+             * Open:
+             * live expected cash.
+             *
+             * Closed:
+             * final stored expected cash.
+             */
             'expected_cash' =>
             $shift->status
                 === CashierShift::STATUS_CLOSED
@@ -990,32 +1435,47 @@ class CashierShiftController extends Controller
                 : (float) $totals['expected_cash'],
 
             'actual_cash' =>
-            $shift->actual_cash !== null
+            $shift->actual_cash
+                !== null
                 ? (float) $shift
                     ->actual_cash
                 : null,
 
             'cash_difference' =>
-            $shift->cash_difference !== null
+            $shift->cash_difference
+                !== null
                 ? (float) $shift
                     ->cash_difference
                 : null,
 
             'opening_notes' =>
-            $shift->opening_notes,
+            $shift
+                ->opening_notes,
 
             'closing_notes' =>
-            $shift->closing_notes,
+            $shift
+                ->closing_notes,
 
             'duration_minutes' =>
             $durationMinutes,
 
+            /*
+             * Existing database relationship
+             * remains named cashier.
+             *
+             * For an Admin register this relation
+             * simply contains the Admin user.
+             */
             'cashier' => [
                 'id' =>
-                $shift->cashier->id,
+                $shift
+                    ->cashier
+                    ->id,
 
                 'name' =>
-                $shift->cashier->name,
+                $shift
+                    ->cashier
+                    ->name,
 
                 'username' =>
                 $shift
@@ -1023,18 +1483,26 @@ class CashierShiftController extends Controller
                     ->username,
 
                 'email' =>
-                $shift->cashier->email,
+                $shift
+                    ->cashier
+                    ->email,
 
                 'phone' =>
-                $shift->cashier->phone,
+                $shift
+                    ->cashier
+                    ->phone,
             ],
 
             'opened_by' => [
                 'id' =>
-                $shift->openedBy->id,
+                $shift
+                    ->openedBy
+                    ->id,
 
                 'name' =>
-                $shift->openedBy->name,
+                $shift
+                    ->openedBy
+                    ->name,
             ],
 
             'closed_by' =>
@@ -1060,6 +1528,12 @@ class CashierShiftController extends Controller
         ];
     }
 
+    /*
+     * =========================================================
+     * MOVEMENT RESPONSE
+     * =========================================================
+     */
+
     /**
      * @return array<string, mixed>
      */
@@ -1079,7 +1553,8 @@ class CashierShiftController extends Controller
                 ->movement_type,
 
             'reason' =>
-            $movement->reason,
+            $movement
+                ->reason,
 
             'amount' =>
             (float) $movement
@@ -1110,5 +1585,18 @@ class CashierShiftController extends Controller
                     ->name,
             ],
         ];
+    }
+
+    /*
+     * =========================================================
+     * ROLE CHECK
+     * =========================================================
+     */
+
+    private function canUseCashRegister(
+        User $user,
+    ): bool {
+        return $user->isAdmin()
+            || $user->isCashier();
     }
 }

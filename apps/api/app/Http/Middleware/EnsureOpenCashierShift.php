@@ -3,47 +3,30 @@
 namespace App\Http\Middleware;
 
 use App\Models\CashierShift;
-use App\Models\User;
 use Closure;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 class EnsureOpenCashierShift
 {
     /**
-     * @param Closure(Request): Response $next
+     * Require both cashiers and administrators to have an open
+     * cash register before completing routes protected by shift.open.
      */
     public function handle(
         Request $request,
         Closure $next,
     ): Response {
-        $user =
-            $request->user();
+        $user = $request->user();
 
-        if (! $user instanceof User) {
-            return new JsonResponse([
+        if (!$user) {
+            return response()->json([
                 'message' =>
                 'Unauthenticated.',
             ], 401);
         }
 
-        /*
-         * Admin users may complete transactions
-         * without opening a cashier shift.
-         */
-        if ($user->isAdmin()) {
-            return $next($request);
-        }
-
-        if (! $user->isCashier()) {
-            return new JsonResponse([
-                'message' =>
-                'Cashier access is required.',
-            ], 403);
-        }
-
-        $hasOpenShift =
+        $hasOpenRegister =
             CashierShift::query()
             ->where(
                 'cashier_id',
@@ -55,10 +38,10 @@ class EnsureOpenCashierShift
             )
             ->exists();
 
-        if (! $hasOpenShift) {
-            return new JsonResponse([
+        if (!$hasOpenRegister) {
+            return response()->json([
                 'message' =>
-                'Open your cashier shift before completing sales, due payments or returns.',
+                'Open your cash register before completing this transaction.',
             ], 422);
         }
 

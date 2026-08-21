@@ -8,6 +8,7 @@ use App\Http\Requests\Purchase\StoreSupplierPaymentRequest;
 use App\Models\Purchase;
 use App\Models\PurchasePayment;
 use App\Models\User;
+use App\Services\CashRegisterService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -17,6 +18,10 @@ use Illuminate\Validation\ValidationException;
 
 class SupplierPayableController extends Controller
 {
+    public function __construct(
+        private readonly CashRegisterService $cashRegisterService,
+    ) {}
+
     public function index(
         Request $request,
     ): JsonResponse {
@@ -542,6 +547,21 @@ class SupplierPayableController extends Controller
                         PurchasePayment::TYPE_INITIAL,
                         $user,
                     );
+
+                    if (
+                        strtolower(
+                            trim(
+                                (string) $payment['payment_method'],
+                            ),
+                        ) === 'cash'
+                    ) {
+                        $this->cashRegisterService
+                            ->recordSupplierCashOut(
+                                $user,
+                                $lockedPurchase,
+                                (float) $payment['amount'],
+                            );
+                    }
                 }
             },
             3,
@@ -707,6 +727,21 @@ class SupplierPayableController extends Controller
                         PurchasePayment::TYPE_DUE,
                         $user,
                     );
+
+                    if (
+                        strtolower(
+                            trim(
+                                (string) $payment['payment_method'],
+                            ),
+                        ) === 'cash'
+                    ) {
+                        $this->cashRegisterService
+                            ->recordSupplierCashOut(
+                                $user,
+                                $lockedPurchase,
+                                (float) $payment['amount'],
+                            );
+                    }
                 }
             },
             3,
