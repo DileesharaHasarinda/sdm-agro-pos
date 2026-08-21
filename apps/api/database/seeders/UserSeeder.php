@@ -12,12 +12,12 @@ class UserSeeder extends Seeder
     {
         User::query()->updateOrCreate(
             [
-                'username' => 'admin',
+                'username' => 'sdmowner',
             ],
             [
                 'name' => 'System Administrator',
                 'email' => 'admin@sdm.local',
-                'password' => Hash::make('Admin@12345'),
+                'password' => Hash::make('SDMagro@1360'),
                 'role' => User::ROLE_ADMIN,
                 'is_active' => true,
             ],
