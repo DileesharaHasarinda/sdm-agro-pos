@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Expense;
+use App\Models\PurchasePayment;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\SalePayment;
@@ -338,6 +339,31 @@ class ReportController extends Controller
                 2,
             );
 
+        /*
+         * Supplier payments are cash-out activity, not expenses.
+         * Include both initial purchase payments and later supplier due
+         * settlements in the Daily Financial Activity series.
+         */
+        $supplierPaymentActivityQuery =
+            PurchasePayment::query()
+            ->whereIn(
+                'payment_type',
+                [
+                    PurchasePayment::TYPE_INITIAL,
+                    PurchasePayment::TYPE_DUE,
+                ],
+            )
+            ->where(
+                'payment_date',
+                '>=',
+                $startUtc,
+            )
+            ->where(
+                'payment_date',
+                '<',
+                $endExclusiveUtc,
+            );
+
         $dailySeries =
             $this->dailySeries(
                 $businessStart,
@@ -346,6 +372,7 @@ class ReportController extends Controller
                 $collectionQuery,
                 $expenseQuery,
                 $returnQuery,
+                $supplierPaymentActivityQuery,
             );
 
         $paymentBreakdown =
@@ -627,6 +654,290 @@ class ReportController extends Controller
             )
             ->values();
 
+        /*
+         * Supplier dues are the current outstanding balances of purchases
+         * created within the selected business-date period.
+         *
+         * This mirrors the Customer Dues report: the selected date range
+         * chooses the purchases included, while due_amount reflects the
+         * purchase's current outstanding balance after supplier payments.
+         */
+        $supplierDueSummary =
+            DB::table('purchases')
+            ->whereBetween(
+                'purchase_date',
+                [
+                    $dateFrom,
+                    $dateTo,
+                ],
+            )
+            ->where(
+                'due_amount',
+                '>',
+                0,
+            )
+            ->selectRaw(
+                '
+                        COUNT(*) AS due_purchase_count,
+
+                        COALESCE(
+                            SUM(due_amount),
+                            0
+                        ) AS due_amount
+                    ',
+            )
+            ->first();
+
+        $supplierDues =
+            DB::table('purchases')
+            ->join(
+                'suppliers',
+                'suppliers.id',
+                '=',
+                'purchases.supplier_id',
+            )
+            ->whereBetween(
+                'purchases.purchase_date',
+                [
+                    $dateFrom,
+                    $dateTo,
+                ],
+            )
+            ->where(
+                'purchases.due_amount',
+                '>',
+                0,
+            )
+            ->selectRaw(
+                '
+                        suppliers.id,
+                        suppliers.name,
+                        suppliers.contact_person,
+                        suppliers.phone,
+
+                        COUNT(purchases.id)
+                            AS due_purchases,
+
+                        COALESCE(
+                            SUM(purchases.grand_total),
+                            0
+                        ) AS purchase_total,
+
+                        COALESCE(
+                            SUM(purchases.paid_amount),
+                            0
+                        ) AS paid_amount,
+
+                        COALESCE(
+                            SUM(purchases.due_amount),
+                            0
+                        ) AS due_amount,
+
+                        MIN(purchases.due_date)
+                            AS oldest_due_date
+                    ',
+            )
+            ->groupBy(
+                'suppliers.id',
+                'suppliers.name',
+                'suppliers.contact_person',
+                'suppliers.phone',
+            )
+            ->orderByDesc(
+                'due_amount',
+            )
+            ->limit(50)
+            ->get()
+            ->map(
+                fn(
+                    object $supplier,
+                ): array => [
+                    'id' =>
+                    (int) $supplier->id,
+
+                    'name' =>
+                    (string) $supplier->name,
+
+                    'contact_person' =>
+                    $supplier->contact_person
+                        ? (string) $supplier
+                            ->contact_person
+                        : null,
+
+                    'phone' =>
+                    $supplier->phone
+                        ? (string) $supplier
+                            ->phone
+                        : null,
+
+                    'due_purchases' =>
+                    (int) $supplier
+                        ->due_purchases,
+
+                    'purchase_total' =>
+                    (float) $supplier
+                        ->purchase_total,
+
+                    'paid_amount' =>
+                    (float) $supplier
+                        ->paid_amount,
+
+                    'due_amount' =>
+                    (float) $supplier
+                        ->due_amount,
+
+                    'oldest_due_date' =>
+                    $supplier->oldest_due_date
+                        ? (string) $supplier
+                            ->oldest_due_date
+                        : null,
+                ],
+            )
+            ->values();
+
+        /*
+         * Supplier payment history is intentionally separate from the
+         * outstanding Supplier Dues query above.
+         *
+         * A supplier payment can be recorded either when the purchase
+         * settlement is first configured (initial_payment) or later against
+         * an existing supplier due (supplier_due_payment). Both are genuine
+         * supplier cash-flow records and must be visible in the report.
+         *
+         * payment_date is stored in UTC. Use the same Sri Lanka business-date
+         * range converted to a UTC half-open interval as the rest of this
+         * report so payments around midnight are assigned to the correct
+         * business day.
+         */
+        $supplierDuePaymentQuery =
+            DB::table('purchase_payments')
+            ->join(
+                'purchases',
+                'purchases.id',
+                '=',
+                'purchase_payments.purchase_id',
+            )
+            ->join(
+                'suppliers',
+                'suppliers.id',
+                '=',
+                'purchases.supplier_id',
+            )
+            ->whereIn(
+                'purchase_payments.payment_type',
+                [
+                    PurchasePayment::TYPE_INITIAL,
+                    PurchasePayment::TYPE_DUE,
+                ],
+            )
+            ->where(
+                'purchase_payments.payment_date',
+                '>=',
+                $startUtc,
+            )
+            ->where(
+                'purchase_payments.payment_date',
+                '<',
+                $endExclusiveUtc,
+            );
+
+        $supplierDuePaymentSummary =
+            (clone $supplierDuePaymentQuery)
+            ->selectRaw(
+                '
+                        COUNT(purchase_payments.id)
+                            AS payment_count,
+
+                        COALESCE(
+                            SUM(purchase_payments.amount),
+                            0
+                        ) AS payment_total
+                    ',
+            )
+            ->first();
+
+        $supplierDuePayments =
+            (clone $supplierDuePaymentQuery)
+            ->select([
+                'purchase_payments.id',
+                'purchase_payments.payment_method',
+                'purchase_payments.payment_type',
+                'purchase_payments.amount',
+                'purchase_payments.reference_number',
+                'purchase_payments.notes',
+                'purchase_payments.payment_date',
+                'purchases.id as purchase_id',
+                'purchases.purchase_number',
+                'suppliers.id as supplier_id',
+                'suppliers.name as supplier_name',
+                'suppliers.contact_person',
+                'suppliers.phone',
+            ])
+            ->orderByDesc(
+                'purchase_payments.payment_date',
+            )
+            ->orderByDesc(
+                'purchase_payments.id',
+            )
+            ->limit(100)
+            ->get()
+            ->map(
+                fn(
+                    object $payment,
+                ): array => [
+                    'id' =>
+                    (int) $payment->id,
+
+                    'supplier_id' =>
+                    (int) $payment->supplier_id,
+
+                    'supplier_name' =>
+                    (string) $payment->supplier_name,
+
+                    'contact_person' =>
+                    $payment->contact_person
+                        ? (string) $payment->contact_person
+                        : null,
+
+                    'phone' =>
+                    $payment->phone
+                        ? (string) $payment->phone
+                        : null,
+
+                    'purchase_id' =>
+                    (int) $payment->purchase_id,
+
+                    'purchase_number' =>
+                    (string) $payment->purchase_number,
+
+                    'payment_method' =>
+                    (string) $payment->payment_method,
+
+                    'payment_type' =>
+                    (string) $payment->payment_type,
+
+                    'amount' =>
+                    (float) $payment->amount,
+
+                    'reference_number' =>
+                    $payment->reference_number
+                        ? (string) $payment->reference_number
+                        : null,
+
+                    'notes' =>
+                    $payment->notes
+                        ? (string) $payment->notes
+                        : null,
+
+                    'payment_date' =>
+                    Carbon::parse(
+                        (string) $payment->payment_date,
+                        'UTC',
+                    )->toIso8601String(),
+                ],
+            )
+            ->values();
+
         $inventorySummary =
             DB::table('stock_batches')
             ->where(
@@ -854,6 +1165,34 @@ class ReportController extends Controller
                         ?? 0
                     ),
 
+                    'supplier_due_purchase_count' =>
+                    (int) (
+                        $supplierDueSummary
+                        ?->due_purchase_count
+                        ?? 0
+                    ),
+
+                    'supplier_due_amount' =>
+                    (float) (
+                        $supplierDueSummary
+                        ?->due_amount
+                        ?? 0
+                    ),
+
+                    'supplier_due_payment_count' =>
+                    (int) (
+                        $supplierDuePaymentSummary
+                        ?->payment_count
+                        ?? 0
+                    ),
+
+                    'supplier_due_payment_total' =>
+                    (float) (
+                        $supplierDuePaymentSummary
+                        ?->payment_total
+                        ?? 0
+                    ),
+
                     'discount_total' =>
                     (float) (
                         $salesSummary
@@ -917,6 +1256,12 @@ class ReportController extends Controller
                 'customer_dues' =>
                 $customerDues,
 
+                'supplier_dues' =>
+                $supplierDues,
+
+                'supplier_due_payments' =>
+                $supplierDuePayments,
+
                 'inventory' => [
                     'summary' => [
                         'quantity' =>
@@ -967,6 +1312,7 @@ class ReportController extends Controller
         Builder $collectionQuery,
         Builder $expenseQuery,
         Builder $returnQuery,
+        Builder $supplierPaymentQuery,
     ): Collection {
         $sales =
             (clone $salesQuery)
@@ -1067,6 +1413,32 @@ class ReportController extends Controller
                 'report_date',
             );
 
+        $supplierPayments =
+            (clone $supplierPaymentQuery)
+            ->selectRaw(
+                '
+                        DATE(
+                            CONVERT_TZ(
+                                payment_date,
+                                \'+00:00\',
+                                \'+05:30\'
+                            )
+                        ) AS report_date,
+
+                        COALESCE(
+                            SUM(amount),
+                            0
+                        ) AS total
+                    ',
+            )
+            ->groupBy(
+                'report_date',
+            )
+            ->pluck(
+                'total',
+                'report_date',
+            );
+
         $series =
             collect();
 
@@ -1104,6 +1476,12 @@ class ReportController extends Controller
                 'returns' =>
                 (float) (
                     $returns->get($key)
+                    ?? 0
+                ),
+
+                'supplier_payments' =>
+                (float) (
+                    $supplierPayments->get($key)
                     ?? 0
                 ),
             ]);

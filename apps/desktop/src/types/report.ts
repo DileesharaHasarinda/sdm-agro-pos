@@ -10,6 +10,10 @@ export interface ReportSummary {
   sales_total: number;
   collected_amount: number;
   due_amount: number;
+  supplier_due_purchase_count: number;
+  supplier_due_amount: number;
+  supplier_due_payment_count: number;
+  supplier_due_payment_total: number;
   discount_total: number;
   gross_profit: number;
   sale_net_profit: number;
@@ -27,6 +31,7 @@ export interface ReportDailyPoint {
   collections: number;
   expenses: number;
   returns: number;
+  supplier_payments: number;
 }
 
 export interface ReportPaymentBreakdown {
@@ -39,12 +44,10 @@ export interface ReportProductPerformance {
   id: number;
   name: string;
   unit: string;
-
   category: {
     id: number;
     name: string;
   };
-
   quantity_sold: number;
   sales_total: number;
   cost_total: number;
@@ -69,6 +72,34 @@ export interface ReportCustomerDue {
   due_amount: number;
 }
 
+export interface ReportSupplierDue {
+  id: number;
+  name: string;
+  contact_person: string | null;
+  phone: string | null;
+  due_purchases: number;
+  purchase_total: number;
+  paid_amount: number;
+  due_amount: number;
+  oldest_due_date: string | null;
+}
+
+export interface ReportSupplierDuePayment {
+  id: number;
+  supplier_id: number;
+  supplier_name: string;
+  contact_person: string | null;
+  phone: string | null;
+  purchase_id: number;
+  purchase_number: string;
+  payment_method: string;
+  payment_type: "initial_payment" | "supplier_due_payment";
+  amount: number;
+  reference_number: string | null;
+  notes: string | null;
+  payment_date: string;
+}
+
 export interface ReportInventorySummary {
   quantity: number;
   purchase_value: number;
@@ -81,12 +112,10 @@ export interface ReportInventoryProduct {
   id: number;
   name: string;
   unit: string;
-
   category: {
     id: number;
     name: string;
   };
-
   quantity: number;
   purchase_value: number;
   retail_value: number;
@@ -107,6 +136,8 @@ export interface ReportOverviewData {
   product_performance: ReportProductPerformance[];
   expense_categories: ReportExpenseCategory[];
   customer_dues: ReportCustomerDue[];
+  supplier_dues: ReportSupplierDue[];
+  supplier_due_payments: ReportSupplierDuePayment[];
   inventory: ReportInventory;
   generated_at: string;
 }

@@ -26,6 +26,7 @@ type ReportTab =
     | 'products'
     | 'expenses'
     | 'dues'
+    | 'supplier-dues'
     | 'inventory';
 
 const currencyFormatter =
@@ -140,6 +141,57 @@ function formatDate(
     );
 }
 
+function formatDateTime(
+    value: string | null,
+): string {
+    if (!value) {
+        return 'Not set';
+    }
+
+    /*
+     * The API returns supplier payment timestamps as UTC ISO strings.
+     * Keep this fallback for older API responses that may still return
+     * MySQL DATETIME values without an explicit timezone suffix.
+     */
+    const normalized =
+        /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+            ? `${value.replace(' ', 'T')}Z`
+            : value;
+
+    const date =
+        new Date(normalized);
+
+    if (
+        Number.isNaN(
+            date.getTime(),
+        )
+    ) {
+        return value;
+    }
+
+    return new Intl.DateTimeFormat(
+        'en-GB',
+        {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+            timeZone:
+                BUSINESS_TIME_ZONE,
+        },
+    ).format(date);
+}
+
+function supplierPaymentTypeName(
+    value: 'initial_payment' | 'supplier_due_payment',
+): string {
+    return value === 'supplier_due_payment'
+        ? 'Due Payment'
+        : 'Initial Payment';
+}
+
 function paymentMethodName(
     value: string,
 ): string {
@@ -150,8 +202,17 @@ function paymentMethodName(
         case 'card':
             return 'Card';
 
-        default:
+        case 'cheque':
+            return 'Cheque';
+
+        case 'cash':
             return 'Cash';
+
+        default:
+            return value
+                .split('_')
+                .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+                .join(' ');
     }
 }
 
@@ -195,7 +256,7 @@ function downloadCsv(
     rows.push(['Final Net Profit', report.summary.final_net_profit]);
     rows.push([]);
     rows.push(['Daily Activity']);
-    rows.push(['Date', 'Sales', 'Collections', 'Expenses', 'Returns']);
+    rows.push(['Date', 'Sales', 'Collections', 'Expenses', 'Returns', 'Supplier Payments']);
 
     report.daily_series.forEach(
         (item) => {
@@ -205,6 +266,7 @@ function downloadCsv(
                 item.collections,
                 item.expenses,
                 item.returns,
+                item.supplier_payments,
             ]);
         },
     );
@@ -255,6 +317,52 @@ function downloadCsv(
                 customer.sales_total,
                 customer.paid_amount,
                 customer.due_amount,
+            ]);
+        },
+    );
+
+    rows.push([]);
+    rows.push(['Supplier Dues']);
+    rows.push([
+        'Supplier',
+        'Contact Person',
+        'Phone',
+        'Due Purchases',
+        'Purchase Total',
+        'Paid Amount',
+        'Due Amount',
+        'Oldest Due Date',
+    ]);
+
+    report.supplier_dues.forEach(
+        (supplier) => {
+            rows.push([
+                supplier.name,
+                supplier.contact_person,
+                supplier.phone,
+                supplier.due_purchases,
+                supplier.purchase_total,
+                supplier.paid_amount,
+                supplier.due_amount,
+                supplier.oldest_due_date,
+            ]);
+        },
+    );
+
+    rows.push([]);
+    rows.push(['Supplier Payment History']);
+    rows.push(['Supplier', 'Purchase', 'Payment Date', 'Payment Method', 'Amount', 'Reference']);
+
+    report.supplier_due_payments.forEach(
+        (payment) => {
+            rows.push([
+                payment.supplier_name,
+                payment.purchase_number,
+                formatDateTime(payment.payment_date),
+                supplierPaymentTypeName(payment.payment_type),
+                paymentMethodName(payment.payment_method),
+                payment.amount,
+                payment.reference_number,
             ]);
         },
     );
@@ -697,6 +805,7 @@ const reportsPageStyles = `
     #sapo-reports-page .rp-legend-collections { background: #16a34a !important; }
     #sapo-reports-page .rp-legend-expenses { background: #f59e0b !important; }
     #sapo-reports-page .rp-legend-returns { background: #dc2626 !important; }
+    #sapo-reports-page .rp-legend-supplier-payments { background: #7c3aed !important; }
 
     /* ---------- Bar chart (scrollable) ---------- */
     #sapo-reports-page .rp-bar-chart {
@@ -722,7 +831,7 @@ const reportsPageStyles = `
 
     #sapo-reports-page .rp-chart-row {
         display: grid !important;
-        grid-template-columns: 90px 1fr 100px !important;
+        grid-template-columns: 90px 1fr 138px !important;
         align-items: center !important;
         gap: 12px !important;
         padding: 7px 0 !important;
@@ -765,6 +874,28 @@ const reportsPageStyles = `
     #sapo-reports-page .rp-collections-bar { background: #16a34a !important; }
     #sapo-reports-page .rp-expenses-bar { background: #f59e0b !important; }
     #sapo-reports-page .rp-returns-bar { background: #dc2626 !important; }
+    #sapo-reports-page .rp-supplier-payments-bar { background: #7c3aed !important; }
+
+    #sapo-reports-page .rp-chart-values {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-end !important;
+        gap: 1px !important;
+        min-width: 0 !important;
+    }
+
+    #sapo-reports-page .rp-chart-values strong {
+        font-size: 13px !important;
+        font-weight: 600 !important;
+        color: var(--rp-text) !important;
+        white-space: nowrap !important;
+    }
+
+    #sapo-reports-page .rp-chart-values small {
+        font-size: 10.5px !important;
+        color: #7c3aed !important;
+        white-space: nowrap !important;
+    }
 
     /* ---------- Payment list (scrollable) ---------- */
     #sapo-reports-page .rp-payment-list {
@@ -1033,6 +1164,7 @@ export default function ReportsPage() {
                         point.collections,
                         point.expenses,
                         point.returns,
+                        point.supplier_payments,
                     ],
                 ),
             );
@@ -1174,6 +1306,14 @@ export default function ReportsPage() {
 
                 <button
                     type="button"
+                    className={activeTab === 'supplier-dues' ? 'rp-tab-active' : ''}
+                    onClick={() => { setActiveTab('supplier-dues'); }}
+                >
+                    Supplier Dues
+                </button>
+
+                <button
+                    type="button"
                     className={activeTab === 'inventory' ? 'rp-tab-active' : ''}
                     onClick={() => { setActiveTab('inventory'); }}
                 >
@@ -1203,10 +1343,28 @@ export default function ReportsPage() {
                                 </article>
 
                                 <article>
-                                    <span>Due Amount</span>
+                                    <span>Customer Dues</span>
                                     <strong className="rp-warning-value">
                                         {currencyFormatter.format(report.summary.due_amount)}
                                     </strong>
+                                </article>
+
+                                <article>
+                                    <span>Supplier Dues</span>
+                                    <strong className="rp-warning-value">
+                                        {currencyFormatter.format(report.summary.supplier_due_amount)}
+                                    </strong>
+                                    <small>
+                                        {report.summary.supplier_due_purchase_count} due purchases
+                                    </small>
+                                </article>
+
+                                <article>
+                                    <span>Supplier Payments</span>
+                                    <strong>{currencyFormatter.format(report.summary.supplier_due_payment_total)}</strong>
+                                    <small>
+                                        {report.summary.supplier_due_payment_count} payments in period
+                                    </small>
                                 </article>
 
                                 <article>
@@ -1260,6 +1418,7 @@ export default function ReportsPage() {
                                         <span><i className="rp-legend-collections" />Collections</span>
                                         <span><i className="rp-legend-expenses" />Expenses</span>
                                         <span><i className="rp-legend-returns" />Returns</span>
+                                        <span><i className="rp-legend-supplier-payments" />Supplier Payments</span>
                                     </div>
 
                                     <div className="rp-bar-chart">
@@ -1284,9 +1443,18 @@ export default function ReportsPage() {
                                                         className="rp-bar rp-returns-bar"
                                                         style={{ width: `${(point.returns / chartMaximum) * 100}%` }}
                                                     />
+                                                    <div
+                                                        className="rp-bar rp-supplier-payments-bar"
+                                                        style={{ width: `${(point.supplier_payments / chartMaximum) * 100}%` }}
+                                                    />
                                                 </div>
 
-                                                <strong>{currencyFormatter.format(point.sales)}</strong>
+                                                <div className="rp-chart-values">
+                                                    <strong>{currencyFormatter.format(point.sales)}</strong>
+                                                    {point.supplier_payments > 0 && (
+                                                        <small>Supplier: {currencyFormatter.format(point.supplier_payments)}</small>
+                                                    )}
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
@@ -1474,6 +1642,136 @@ export default function ReportsPage() {
                                 </table>
                             </div>
                         </section>
+                    )}
+
+                    {activeTab === 'supplier-dues' && (
+                        <>
+                            <section className="rp-summary-grid">
+                                <article>
+                                    <span>Outstanding Supplier Dues</span>
+                                    <strong className="rp-warning-value">
+                                        {currencyFormatter.format(report.summary.supplier_due_amount)}
+                                    </strong>
+                                    <small>{report.summary.supplier_due_purchase_count} due purchases</small>
+                                </article>
+
+                                <article>
+                                    <span>Supplier Payments in Period</span>
+                                    <strong className="rp-positive-value">
+                                        {currencyFormatter.format(report.summary.supplier_due_payment_total)}
+                                    </strong>
+                                    <small>{report.summary.supplier_due_payment_count} payment records</small>
+                                </article>
+                            </section>
+
+                            <section className="rp-card">
+                                <header className="rp-card-header">
+                                    <div>
+                                        <span className="rp-kicker">Accounts payable</span>
+                                        <h3>Outstanding Supplier Dues</h3>
+                                    </div>
+                                </header>
+
+                                <div className="rp-table-container">
+                                    <table className="rp-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Supplier</th>
+                                                <th>Phone</th>
+                                                <th>Due Purchases</th>
+                                                <th>Purchase Total</th>
+                                                <th>Paid</th>
+                                                <th>Due</th>
+                                                <th>Oldest Due Date</th>
+                                            </tr>
+                                        </thead>
+
+                                        <tbody>
+                                            {report.supplier_dues.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={7} className="rp-table-state">
+                                                        No outstanding supplier dues found.
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                report.supplier_dues.map((supplier) => (
+                                                    <tr key={supplier.id}>
+                                                        <td>
+                                                            <strong>{supplier.name}</strong>
+                                                            <small>{supplier.contact_person ?? 'No contact person'}</small>
+                                                        </td>
+                                                        <td>{supplier.phone ?? '—'}</td>
+                                                        <td>{supplier.due_purchases}</td>
+                                                        <td>{currencyFormatter.format(supplier.purchase_total)}</td>
+                                                        <td>{currencyFormatter.format(supplier.paid_amount)}</td>
+                                                        <td>
+                                                            <strong className="rp-warning-value">
+                                                                {currencyFormatter.format(supplier.due_amount)}
+                                                            </strong>
+                                                        </td>
+                                                        <td>{formatDate(supplier.oldest_due_date)}</td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+
+                            <section className="rp-card">
+                                <header className="rp-card-header">
+                                    <div>
+                                        <span className="rp-kicker">Payment history</span>
+                                        <h3>Supplier Payment History</h3>
+                                    </div>
+                                </header>
+
+                                <div className="rp-table-container">
+                                    <table className="rp-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Supplier</th>
+                                                <th>Purchase</th>
+                                                <th>Payment Date</th>
+                                                <th>Type</th>
+                                                <th>Method</th>
+                                                <th>Amount</th>
+                                                <th>Reference</th>
+                                            </tr>
+                                        </thead>
+
+                                        <tbody>
+                                            {report.supplier_due_payments.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={7} className="rp-table-state">
+                                                        No supplier payments found for this period.
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                report.supplier_due_payments.map((payment) => (
+                                                    <tr key={payment.id}>
+                                                        <td>
+                                                            <strong>{payment.supplier_name}</strong>
+                                                            <small>{payment.phone ?? payment.contact_person ?? '—'}</small>
+                                                        </td>
+                                                        <td><strong>{payment.purchase_number}</strong></td>
+                                                        <td>{formatDateTime(payment.payment_date)}</td>
+                                                        <td>{supplierPaymentTypeName(payment.payment_type)}</td>
+                                                        <td>{paymentMethodName(payment.payment_method)}</td>
+                                                        <td>
+                                                            <strong className="rp-positive-value">
+                                                                {currencyFormatter.format(payment.amount)}
+                                                            </strong>
+                                                        </td>
+                                                        <td>{payment.reference_number ?? '—'}</td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+                        </>
                     )}
 
                     {activeTab === 'inventory' && (

@@ -30,6 +30,23 @@ import type {
     Cheque,
 } from '../../types/cheque';
 
+type DashboardDailyPointWithSupplierPayments =
+    DashboardDailyPoint & {
+        supplier_payments?: number;
+    };
+
+function supplierPaymentsForPoint(
+    point: DashboardDailyPoint,
+): number {
+    return Number(
+        (
+            point as
+            DashboardDailyPointWithSupplierPayments
+        ).supplier_payments
+        ?? 0,
+    );
+}
+
 /* =========================================================
    FORMATTERS
    ========================================================= */
@@ -1418,6 +1435,10 @@ const DASHBOARD_STYLES = `
     background: #d97706 !important;
 }
 
+#agro-admin-dashboard-page .agro-legend-supplier-payments {
+    background: #7c3aed !important;
+}
+
 #agro-admin-dashboard-page .agro-chart {
     display: flex !important;
 
@@ -1439,7 +1460,7 @@ const DASHBOARD_STYLES = `
             0,
             1fr
         )
-        110px !important;
+        155px !important;
 
     align-items: center !important;
 
@@ -1465,6 +1486,39 @@ const DASHBOARD_STYLES = `
     font-weight: 700 !important;
 
     text-align: right !important;
+
+    white-space: nowrap !important;
+}
+
+#agro-admin-dashboard-page .agro-chart-values {
+    display: flex !important;
+
+    min-width: 0 !important;
+
+    flex-direction: column !important;
+    align-items: flex-end !important;
+
+    gap: 2px !important;
+
+    text-align: right !important;
+}
+
+#agro-admin-dashboard-page .agro-chart-values strong {
+    color:
+        var(--agro-text-primary) !important;
+
+    font-size: 13px !important;
+    font-weight: 700 !important;
+
+    white-space: nowrap !important;
+}
+
+#agro-admin-dashboard-page .agro-chart-values span {
+    color:
+        var(--agro-purple) !important;
+
+    font-size: 10px !important;
+    font-weight: 700 !important;
 
     white-space: nowrap !important;
 }
@@ -1510,6 +1564,10 @@ const DASHBOARD_STYLES = `
 
 #agro-admin-dashboard-page .agro-bar-returns {
     background: #d97706 !important;
+}
+
+#agro-admin-dashboard-page .agro-bar-supplier-payments {
+    background: #7c3aed !important;
 }
 
 /* =========================================================
@@ -2007,8 +2065,13 @@ span.agro-activity-meta {
 
     #agro-admin-dashboard-page
     .agro-chart-row
-    > strong {
+    > strong,
+    #agro-admin-dashboard-page
+    .agro-chart-row
+    > .agro-chart-values {
         grid-column: 2 !important;
+
+        align-items: flex-start !important;
 
         text-align: left !important;
     }
@@ -2310,6 +2373,10 @@ export default function AdminDashboardPage() {
                                     Number(
                                         point.returns
                                         ?? 0,
+                                    ),
+
+                                    supplierPaymentsForPoint(
+                                        point,
                                     ),
                                 ],
                         ),
@@ -2992,6 +3059,11 @@ export default function AdminDashboardPage() {
                                 <i className="agro-legend-dot agro-legend-returns" />
                                 Returns
                             </span>
+
+                            <span>
+                                <i className="agro-legend-dot agro-legend-supplier-payments" />
+                                Supplier Payments
+                            </span>
                         </div>
 
                         <div className="agro-chart">
@@ -3066,15 +3138,51 @@ export default function AdminDashboardPage() {
                                                             ) * 100}%`,
                                                     }}
                                                 />
+
+                                                <div
+                                                    className="agro-bar agro-bar-supplier-payments"
+                                                    title={
+                                                        `Supplier Payments: ${currencyFormatter.format(
+                                                            supplierPaymentsForPoint(
+                                                                point,
+                                                            ),
+                                                        )}`
+                                                    }
+                                                    style={{
+                                                        width:
+                                                            `${(
+                                                                supplierPaymentsForPoint(
+                                                                    point,
+                                                                )
+                                                                / chartMaximum
+                                                            ) * 100}%`,
+                                                    }}
+                                                />
                                             </div>
 
-                                            <strong>
-                                                {currencyFormatter.format(
-                                                    Number(
-                                                        point.sales,
-                                                    ),
-                                                )}
-                                            </strong>
+                                            <div className="agro-chart-values">
+                                                <strong>
+                                                    {currencyFormatter.format(
+                                                        Number(
+                                                            point.sales,
+                                                        ),
+                                                    )}
+                                                </strong>
+
+                                                {supplierPaymentsForPoint(
+                                                    point,
+                                                ) > 0 && (
+                                                        <span>
+                                                            Supplier:
+                                                            {' '}
+                                                            {currencyFormatter.format(
+                                                                supplierPaymentsForPoint(
+                                                                    point,
+                                                                ),
+                                                            )}
+                                                        </span>
+                                                    )}
+                                            </div>
                                         </div>
                                     ),
                                 )}

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Expense;
+use App\Models\PurchasePayment;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\SalePayment;
@@ -17,21 +18,7 @@ use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
-        /**
-     * SDM Agro operates in Sri Lanka.
-     *
-     * Laravel remains configured in UTC. Business-day calculations are
-     * explicitly evaluated in Asia/Colombo and then converted to UTC for
-     * timestamp comparisons.
-     */
     private const BUSINESS_TIME_ZONE = 'Asia/Colombo';
-
-    /**
-     * Sri Lanka is UTC+05:30 and does not currently observe DST.
-     * This fixed offset is used only for SQL grouping of UTC timestamps into
-     * Sri Lanka calendar dates. Carbon still uses the named timezone for all
-     * range calculations.
-     */
     private const BUSINESS_UTC_OFFSET_MINUTES = 330;
 
     public function admin(
@@ -130,10 +117,6 @@ class DashboardController extends Controller
                 )
                 ->sum('amount');
 
-        /*
-         * expense_date is a DATE business field, not an instant timestamp.
-         * It must therefore be compared directly with the Sri Lanka date.
-         */
         $todayExpenses =
             (float) Expense::query()
                 ->whereDate(
@@ -192,16 +175,119 @@ class DashboardController extends Controller
 
                         COALESCE(
                             SUM(
-                                available_quantity
-                                * purchase_cost
+                                CASE
+                                    WHEN
+                                        (
+                                            is_dual_unit = 1
+                                            OR (
+                                                secondary_unit IS NOT NULL
+                                                AND CHAR_LENGTH(TRIM(secondary_unit)) > 0
+                                                AND COALESCE(
+                                                    conversion_factor,
+                                                    0
+                                                ) > 1
+                                            )
+                                        )
+                                        AND COALESCE(
+                                            conversion_factor,
+                                            0
+                                        ) > 0
+                                    THEN
+                                        available_quantity
+                                        *
+                                        CASE
+                                            WHEN
+                                                base_unit_cost IS NOT NULL
+                                                AND base_unit_cost > 0
+                                            THEN
+                                                base_unit_cost
+                                            ELSE
+                                                COALESCE(
+                                                    purchase_cost
+                                                    / NULLIF(
+                                                        conversion_factor,
+                                                        0
+                                                    ),
+                                                    0
+                                                )
+                                        END
+                                    ELSE
+                                        available_quantity
+                                        * COALESCE(
+                                            purchase_cost,
+                                            0
+                                        )
+                                END
                             ),
                             0
                         ) AS purchase_value,
 
                         COALESCE(
                             SUM(
-                                available_quantity
-                                * selling_price
+                                CASE
+                                    WHEN
+                                        (
+                                            is_dual_unit = 1
+                                            OR (
+                                                secondary_unit IS NOT NULL
+                                                AND CHAR_LENGTH(TRIM(secondary_unit)) > 0
+                                                AND COALESCE(
+                                                    conversion_factor,
+                                                    0
+                                                ) > 1
+                                            )
+                                        )
+                                        AND COALESCE(
+                                            conversion_factor,
+                                            0
+                                        ) > 0
+                                    THEN
+                                        (
+                                            FLOOR(
+                                                (
+                                                    available_quantity
+                                                    + 0.0000001
+                                                )
+                                                / conversion_factor
+                                            )
+                                            * COALESCE(
+                                                selling_price,
+                                                0
+                                            )
+                                        )
+                                        +
+                                        (
+                                            GREATEST(
+                                                0,
+                                                available_quantity
+                                                - (
+                                                    FLOOR(
+                                                        (
+                                                            available_quantity
+                                                            + 0.0000001
+                                                        )
+                                                        / conversion_factor
+                                                    )
+                                                    * conversion_factor
+                                                )
+                                            )
+                                            * COALESCE(
+                                                secondary_selling_price,
+                                                selling_price
+                                                / NULLIF(
+                                                    conversion_factor,
+                                                    0
+                                                ),
+                                                0
+                                            )
+                                        )
+                                    ELSE
+                                        available_quantity
+                                        * COALESCE(
+                                            selling_price,
+                                            0
+                                        )
+                                END
                             ),
                             0
                         ) AS retail_value
@@ -942,6 +1028,38 @@ class DashboardController extends Controller
                 'report_date',
             );
 
+        $supplierPayments =
+            PurchasePayment::query()
+            ->whereBetween(
+                'payment_date',
+                [
+                    $startUtc,
+                    $endUtc,
+                ],
+            )
+            ->selectRaw(
+                "
+                        DATE(
+                            DATE_ADD(
+                                payment_date,
+                                INTERVAL {$offsetMinutes} MINUTE
+                            )
+                        ) AS report_date,
+
+                        COALESCE(
+                            SUM(amount),
+                            0
+                        ) AS total
+                    ",
+            )
+            ->groupBy(
+                'report_date',
+            )
+            ->pluck(
+                'total',
+                'report_date',
+            );
+
         $expenses =
             Expense::query()
             ->whereBetween(
@@ -1009,6 +1127,7 @@ class DashboardController extends Controller
             $collections,
             $expenses,
             $returns,
+            $supplierPayments,
         );
     }
 
@@ -1146,6 +1265,7 @@ class DashboardController extends Controller
             $collections,
             collect(),
             $returns,
+            collect(),
         );
     }
 
@@ -1154,6 +1274,7 @@ class DashboardController extends Controller
      * @param Collection<string, mixed> $collections
      * @param Collection<string, mixed> $expenses
      * @param Collection<string, mixed> $returns
+     * @param Collection<string, mixed> $supplierPayments
      *
      * @return Collection<int, array<string, mixed>>
      */
@@ -1164,6 +1285,7 @@ class DashboardController extends Controller
         Collection $collections,
         Collection $expenses,
         Collection $returns,
+        Collection $supplierPayments,
     ): Collection {
         $series = collect();
 
@@ -1211,6 +1333,12 @@ class DashboardController extends Controller
                 'returns' =>
                 (float) (
                     $returns->get($key)
+                    ?? 0
+                ),
+
+                'supplier_payments' =>
+                (float) (
+                    $supplierPayments->get($key)
                     ?? 0
                 ),
             ]);
