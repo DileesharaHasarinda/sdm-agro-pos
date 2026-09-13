@@ -100,8 +100,23 @@ export interface ReportSupplierDuePayment {
   payment_date: string;
 }
 
-export interface ReportInventorySummary {
+export interface ReportInventoryUnitQuantity {
+  unit: string;
   quantity: number;
+}
+
+export interface ReportInventorySummary {
+  /*
+   * Backwards-compatible mixed physical total.
+   * Do not display this as a single business quantity when stock uses
+   * different units such as Kg, Bag, Bottle and Pack.
+   */
+  quantity: number;
+
+  stocked_product_count: number;
+
+  quantity_by_unit: ReportInventoryUnitQuantity[];
+
   purchase_value: number;
   retail_value: number;
   expiring_batch_count: number;
@@ -111,7 +126,12 @@ export interface ReportInventorySummary {
 export interface ReportInventoryProduct {
   id: number;
   name: string;
+
+  /* Configured / primary product unit. */
   unit: string;
+
+  /* Physical unit used by quantity. */
+  stock_unit: string;
   category: {
     id: number;
     name: string;

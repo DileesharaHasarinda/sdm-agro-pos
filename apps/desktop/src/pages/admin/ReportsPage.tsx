@@ -5,6 +5,9 @@ import {
     useState,
 } from 'react';
 
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+
 import {
     useAuth,
 } from '../../auth/AuthContext';
@@ -192,6 +195,47 @@ function supplierPaymentTypeName(
         : 'Initial Payment';
 }
 
+function formatQuantity(
+    value: number,
+): string {
+    return new Intl.NumberFormat(
+        'en-GB',
+        {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 3,
+        },
+    ).format(
+        Number(
+            value
+            ?? 0,
+        ),
+    );
+}
+
+function inventoryQuantityText(
+    report: ReportOverviewData,
+): string {
+    const groups =
+        report
+            .inventory
+            .summary
+            .quantity_by_unit
+        ?? [];
+
+    if (groups.length === 0) {
+        return '0';
+    }
+
+    return groups
+        .map(
+            (group) =>
+                `${formatQuantity(
+                    group.quantity,
+                )} ${group.unit}`,
+        )
+        .join(' • ');
+}
+
 function paymentMethodName(
     value: string,
 ): string {
@@ -351,7 +395,7 @@ function downloadCsv(
 
     rows.push([]);
     rows.push(['Supplier Payment History']);
-    rows.push(['Supplier', 'Purchase', 'Payment Date', 'Payment Method', 'Amount', 'Reference']);
+    rows.push(['Supplier', 'Purchase', 'Payment Date', 'Type', 'Payment Method', 'Amount', 'Reference']);
 
     report.supplier_due_payments.forEach(
         (payment) => {
@@ -368,8 +412,27 @@ function downloadCsv(
     );
 
     rows.push([]);
+    rows.push(['Inventory Summary']);
+    rows.push([
+        'Stocked Products',
+        report.inventory.summary.stocked_product_count,
+    ]);
+    rows.push([
+        'Stock Quantity',
+        inventoryQuantityText(report),
+    ]);
+    rows.push([
+        'Purchase Value',
+        report.inventory.summary.purchase_value,
+    ]);
+    rows.push([
+        'Retail Value',
+        report.inventory.summary.retail_value,
+    ]);
+
+    rows.push([]);
     rows.push(['Inventory']);
-    rows.push(['Product', 'Category', 'Quantity', 'Unit', 'Batch Count', 'Purchase Value', 'Retail Value', 'Nearest Expiry']);
+    rows.push(['Product', 'Category', 'Quantity', 'Stock Unit', 'Batch Count', 'Purchase Value', 'Retail Value', 'Nearest Expiry']);
 
     report.inventory.products.forEach(
         (product) => {
@@ -377,7 +440,7 @@ function downloadCsv(
                 product.name,
                 product.category.name,
                 product.quantity,
-                product.unit,
+                product.stock_unit,
                 product.batch_count,
                 product.purchase_value,
                 product.retail_value,
@@ -413,6 +476,475 @@ function downloadCsv(
     anchor.remove();
 
     URL.revokeObjectURL(url);
+}
+
+
+function downloadPdf(
+    report: ReportOverviewData,
+): void {
+    const pdf =
+        new jsPDF({
+            orientation: 'landscape',
+            unit: 'mm',
+            format: 'a4',
+        });
+
+    const pageWidth =
+        pdf.internal.pageSize.getWidth();
+
+    const addSectionTitle = (
+        title: string,
+        subtitle?: string,
+    ): void => {
+        pdf.setFontSize(15);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(title, 14, 16);
+
+        if (subtitle) {
+            pdf.setFontSize(9);
+            pdf.setFont('helvetica', 'normal');
+            pdf.text(subtitle, 14, 22);
+        }
+    };
+
+    const money = (
+        value: number,
+    ): string =>
+        currencyFormatter.format(
+            Number(value ?? 0),
+        );
+
+    /* =====================================================
+       COVER / FINANCIAL SUMMARY
+       ===================================================== */
+
+    pdf.setFontSize(20);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text(
+        'SDM Agro POS Report',
+        pageWidth / 2,
+        17,
+        { align: 'center' },
+    );
+
+    pdf.setFontSize(10);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text(
+        `Period: ${formatDate(report.period.date_from)} to ${formatDate(report.period.date_to)}`,
+        pageWidth / 2,
+        24,
+        { align: 'center' },
+    );
+
+    autoTable(
+        pdf,
+        {
+            startY: 32,
+            head: [[
+                'Metric',
+                'Value',
+            ]],
+            body: [
+                ['Sales Count', String(report.summary.sales_count)],
+                ['Sales Total', money(report.summary.sales_total)],
+                ['Collected Amount', money(report.summary.collected_amount)],
+                ['Customer Due', money(report.summary.due_amount)],
+                ['Supplier Due', money(report.summary.supplier_due_amount)],
+                ['Supplier Payments', money(report.summary.supplier_due_payment_total)],
+                ['Discount Total', money(report.summary.discount_total)],
+                ['Gross Profit', money(report.summary.gross_profit)],
+                ['Return Refund', money(report.summary.return_refund)],
+                ['Expense Total', money(report.summary.expense_total)],
+                ['Final Net Profit', money(report.summary.final_net_profit)],
+            ],
+            theme: 'grid',
+            styles: {
+                fontSize: 9,
+                cellPadding: 2.5,
+            },
+            headStyles: {
+                fontStyle: 'bold',
+            },
+        },
+    );
+
+    /* =====================================================
+       DAILY FINANCIAL ACTIVITY
+       ===================================================== */
+
+    pdf.addPage();
+    addSectionTitle(
+        'Daily Financial Activity',
+        `${formatDate(report.period.date_from)} to ${formatDate(report.period.date_to)}`,
+    );
+
+    autoTable(
+        pdf,
+        {
+            startY: 28,
+            head: [[
+                'Date',
+                'Sales',
+                'Collections',
+                'Expenses',
+                'Returns',
+                'Supplier Payments',
+            ]],
+            body:
+                report.daily_series.map(
+                    (item) => [
+                        formatDate(item.date),
+                        money(item.sales),
+                        money(item.collections),
+                        money(item.expenses),
+                        money(item.returns),
+                        money(item.supplier_payments),
+                    ],
+                ),
+            theme: 'grid',
+            styles: {
+                fontSize: 8,
+                cellPadding: 2.2,
+            },
+        },
+    );
+
+    /* =====================================================
+       PAYMENT METHODS
+       ===================================================== */
+
+    pdf.addPage();
+    addSectionTitle('Payment Methods');
+
+    autoTable(
+        pdf,
+        {
+            startY: 23,
+            head: [[
+                'Payment Method',
+                'Transactions',
+                'Total',
+            ]],
+            body:
+                report.payment_breakdown.map(
+                    (payment) => [
+                        paymentMethodName(payment.payment_method),
+                        String(payment.transactions),
+                        money(payment.total),
+                    ],
+                ),
+            theme: 'grid',
+            styles: {
+                fontSize: 8,
+                cellPadding: 2.2,
+            },
+        },
+    );
+
+    /* =====================================================
+       PRODUCT PERFORMANCE
+       ===================================================== */
+
+    pdf.addPage();
+    addSectionTitle('Product Performance');
+
+    autoTable(
+        pdf,
+        {
+            startY: 23,
+            head: [[
+                'Product',
+                'Category',
+                'Quantity',
+                'Sales',
+                'Cost',
+                'Gross Profit',
+            ]],
+            body:
+                report.product_performance.map(
+                    (product) => [
+                        product.name,
+                        product.category.name,
+                        `${formatQuantity(product.quantity_sold)} ${product.unit}`,
+                        money(product.sales_total),
+                        money(product.cost_total),
+                        money(product.gross_profit),
+                    ],
+                ),
+            theme: 'grid',
+            styles: {
+                fontSize: 7.5,
+                cellPadding: 2,
+            },
+        },
+    );
+
+    /* =====================================================
+       EXPENSES
+       ===================================================== */
+
+    pdf.addPage();
+    addSectionTitle('Expense Category Report');
+
+    autoTable(
+        pdf,
+        {
+            startY: 23,
+            head: [[
+                'Category',
+                'Records',
+                'Total Amount',
+            ]],
+            body:
+                report.expense_categories.map(
+                    (category) => [
+                        category.name,
+                        String(category.expense_count),
+                        money(category.total_amount),
+                    ],
+                ),
+            theme: 'grid',
+            styles: {
+                fontSize: 8,
+                cellPadding: 2.2,
+            },
+        },
+    );
+
+    /* =====================================================
+       CUSTOMER DUES
+       ===================================================== */
+
+    pdf.addPage();
+    addSectionTitle('Customer Due Report');
+
+    autoTable(
+        pdf,
+        {
+            startY: 23,
+            head: [[
+                'Customer',
+                'Code',
+                'Mobile',
+                'Due Sales',
+                'Sales Total',
+                'Paid',
+                'Due',
+            ]],
+            body:
+                report.customer_dues.map(
+                    (customer) => [
+                        customer.name,
+                        customer.customer_code,
+                        customer.mobile ?? '-',
+                        String(customer.due_sales),
+                        money(customer.sales_total),
+                        money(customer.paid_amount),
+                        money(customer.due_amount),
+                    ],
+                ),
+            theme: 'grid',
+            styles: {
+                fontSize: 7.5,
+                cellPadding: 2,
+            },
+        },
+    );
+
+    /* =====================================================
+       SUPPLIER DUES
+       ===================================================== */
+
+    pdf.addPage();
+    addSectionTitle('Outstanding Supplier Dues');
+
+    autoTable(
+        pdf,
+        {
+            startY: 23,
+            head: [[
+                'Supplier',
+                'Contact',
+                'Phone',
+                'Due Purchases',
+                'Purchase Total',
+                'Paid',
+                'Due',
+                'Oldest Due Date',
+            ]],
+            body:
+                report.supplier_dues.map(
+                    (supplier) => [
+                        supplier.name,
+                        supplier.contact_person ?? '-',
+                        supplier.phone ?? '-',
+                        String(supplier.due_purchases),
+                        money(supplier.purchase_total),
+                        money(supplier.paid_amount),
+                        money(supplier.due_amount),
+                        formatDate(supplier.oldest_due_date),
+                    ],
+                ),
+            theme: 'grid',
+            styles: {
+                fontSize: 7,
+                cellPadding: 1.8,
+            },
+        },
+    );
+
+    /* =====================================================
+       SUPPLIER PAYMENT HISTORY
+       ===================================================== */
+
+    pdf.addPage();
+    addSectionTitle('Supplier Payment History');
+
+    autoTable(
+        pdf,
+        {
+            startY: 23,
+            head: [[
+                'Supplier',
+                'Purchase',
+                'Payment Date',
+                'Type',
+                'Method',
+                'Amount',
+                'Reference',
+            ]],
+            body:
+                report.supplier_due_payments.map(
+                    (payment) => [
+                        payment.supplier_name,
+                        payment.purchase_number,
+                        formatDateTime(payment.payment_date),
+                        supplierPaymentTypeName(payment.payment_type),
+                        paymentMethodName(payment.payment_method),
+                        money(payment.amount),
+                        payment.reference_number ?? '-',
+                    ],
+                ),
+            theme: 'grid',
+            styles: {
+                fontSize: 7,
+                cellPadding: 1.8,
+            },
+        },
+    );
+
+    /* =====================================================
+       INVENTORY SUMMARY + INVENTORY VALUE REPORT
+       ===================================================== */
+
+    pdf.addPage();
+    addSectionTitle('Inventory Summary');
+
+    autoTable(
+        pdf,
+        {
+            startY: 23,
+            head: [[
+                'Metric',
+                'Value',
+            ]],
+            body: [
+                [
+                    'Stocked Products',
+                    String(report.inventory.summary.stocked_product_count),
+                ],
+                [
+                    'Stock Quantity',
+                    inventoryQuantityText(report),
+                ],
+                [
+                    'Purchase Value',
+                    money(report.inventory.summary.purchase_value),
+                ],
+                [
+                    'Retail Value',
+                    money(report.inventory.summary.retail_value),
+                ],
+                [
+                    'Expiring Batches',
+                    String(report.inventory.summary.expiring_batch_count),
+                ],
+                [
+                    'Expired Batches',
+                    String(report.inventory.summary.expired_batch_count),
+                ],
+            ],
+            theme: 'grid',
+            styles: {
+                fontSize: 8,
+                cellPadding: 2.2,
+            },
+        },
+    );
+
+    pdf.addPage();
+    addSectionTitle('Inventory Value Report');
+
+    autoTable(
+        pdf,
+        {
+            startY: 23,
+            head: [[
+                'Product',
+                'Category',
+                'Quantity',
+                'Batches',
+                'Purchase Value',
+                'Retail Value',
+                'Nearest Expiry',
+            ]],
+            body:
+                report.inventory.products.map(
+                    (product) => [
+                        product.name,
+                        product.category.name,
+                        `${formatQuantity(product.quantity)} ${product.stock_unit}`,
+                        String(product.batch_count),
+                        money(product.purchase_value),
+                        money(product.retail_value),
+                        formatDate(product.nearest_expiry),
+                    ],
+                ),
+            theme: 'grid',
+            styles: {
+                fontSize: 7,
+                cellPadding: 1.8,
+            },
+        },
+    );
+
+    /* =====================================================
+       FOOTERS / PAGE NUMBERS
+       ===================================================== */
+
+    const totalPages =
+        pdf.getNumberOfPages();
+
+    for (
+        let pageNumber = 1;
+        pageNumber <= totalPages;
+        pageNumber += 1
+    ) {
+        pdf.setPage(pageNumber);
+        pdf.setFontSize(8);
+        pdf.setFont('helvetica', 'normal');
+
+        pdf.text(
+            `Page ${pageNumber} of ${totalPages}`,
+            pageWidth - 14,
+            pdf.internal.pageSize.getHeight() - 8,
+            { align: 'right' },
+        );
+    }
+
+    pdf.save(
+        `sdm-report-${report.period.date_from}-to-${report.period.date_to}.pdf`,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1058,20 +1590,6 @@ const reportsPageStyles = `
         background: var(--rp-white) !important;
     }
 
-    /* ---------- Print ---------- */
-    @media print {
-        #sapo-reports-page .rp-filter-card,
-        #sapo-reports-page .rp-header-actions,
-        #sapo-reports-page .rp-tabs {
-            display: none !important;
-        }
-
-        #sapo-reports-page .rp-table-container {
-            max-height: none !important;
-            overflow: visible !important;
-        }
-    }
-
     /* ---------- Responsive ---------- */
     @media (max-width: 760px) {
         #sapo-reports-page .rp-header {
@@ -1190,9 +1708,13 @@ export default function ReportsPage() {
                         type="button"
                         className="rp-secondary-button"
                         disabled={!report}
-                        onClick={() => { window.print(); }}
+                        onClick={() => {
+                            if (report) {
+                                downloadPdf(report);
+                            }
+                        }}
                     >
-                        Print Report
+                        Download PDF
                     </button>
 
                     <button
@@ -1779,12 +2301,20 @@ export default function ReportsPage() {
                             <section className="rp-summary-grid">
                                 <article>
                                     <span>Stock Quantity</span>
-                                    <strong>{report.inventory.summary.quantity}</strong>
+                                    <strong>{inventoryQuantityText(report)}</strong>
+                                    <small>
+                                        {report.inventory.summary.stocked_product_count}
+                                        {' '}
+                                        {report.inventory.summary.stocked_product_count === 1
+                                            ? 'stocked product'
+                                            : 'stocked products'}
+                                    </small>
                                 </article>
 
                                 <article>
                                     <span>Purchase Value</span>
                                     <strong>{currencyFormatter.format(report.inventory.summary.purchase_value)}</strong>
+                                    <small>Current stock value at cost</small>
                                 </article>
 
                                 <article>
@@ -1841,7 +2371,7 @@ export default function ReportsPage() {
                                                     <tr key={product.id}>
                                                         <td><strong>{product.name}</strong></td>
                                                         <td>{product.category.name}</td>
-                                                        <td>{product.quantity} {product.unit}</td>
+                                                        <td>{formatQuantity(product.quantity)} {product.stock_unit}</td>
                                                         <td>{product.batch_count}</td>
                                                         <td>{currencyFormatter.format(product.purchase_value)}</td>
                                                         <td>{currencyFormatter.format(product.retail_value)}</td>

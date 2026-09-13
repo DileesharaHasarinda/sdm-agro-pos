@@ -42,6 +42,8 @@
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "node-thermal-printer": "^4.6.0",
     "pusher-js": "^8.6.0",
     "react": "^19.2.8",
