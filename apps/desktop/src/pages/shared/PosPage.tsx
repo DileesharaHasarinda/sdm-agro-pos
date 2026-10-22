@@ -54,10 +54,53 @@ const PRODUCT_PAGE_SIZE = 24;
 const POS_DRAFT_STORAGE_KEY =
     'sdm-agro-pos:current-sale:v1';
 
+/* Purchase cost is display-only and is not sent to the sale API. */
+type PosCartItemWithCost = PosCartItem & {
+    purchase_cost?: number | null;
+};
+
+type PosSaleOptionWithCost = PosSaleOption & {
+    purchase_cost?: number | null;
+};
+
+type PosStockBatchWithCost = PosStockBatch & {
+    purchase_cost?: number | null;
+    base_unit_cost?: number | null;
+};
+
 type PosDraftState = {
-    cart: PosCartItem[];
+    cart: PosCartItemWithCost[];
     saleDiscount: string;
 };
+
+/*
+ * The Laravel POS response provides purchase_cost per sale option:
+ * a full bag has a bag cost, while Loose Kg has a per-Kg cost.
+ * This deliberately does not derive costs from selling prices.
+ */
+function getSelectedUnitPurchaseCost(
+    option: PosSaleOption,
+    batch: PosStockBatch,
+): number | null {
+    const optionCost = (option as PosSaleOptionWithCost).purchase_cost;
+    const batchWithCost = batch as PosStockBatchWithCost;
+
+    const rawCost = optionCost ?? (
+        option.key === 'secondary'
+            ? batchWithCost.base_unit_cost
+            : batchWithCost.purchase_cost
+    );
+
+    if (rawCost === null || rawCost === undefined) {
+        return null;
+    }
+
+    const value = Number(rawCost);
+
+    return Number.isFinite(value) && value >= 0
+        ? value
+        : null;
+}
 
 function getEmptyPosDraft(): PosDraftState {
     return {
@@ -137,7 +180,7 @@ function loadPosDraft(
                 parsedDraft.cart,
             )
                 ? (
-                    parsedDraft.cart as PosCartItem[]
+                    parsedDraft.cart as PosCartItemWithCost[]
                 )
                 : [];
 
@@ -2691,6 +2734,24 @@ const styles = `
     text-align: right !important;
 }
 
+#agro-pos .cart-cost-note {
+    margin: -3px 0 2px !important;
+    color: var(--muted) !important;
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+}
+
+#agro-pos .cart-cost-row {
+    padding: 9px 10px !important;
+    background: #eff8ff !important;
+    border: 1px solid #d1e9ff !important;
+    border-radius: 8px !important;
+}
+
+#agro-pos .summary-row.cart-cost-row strong {
+    color: #175cd3 !important;
+}
+
 #agro-pos .cart-summary {
     display: flex !important;
 
@@ -3229,7 +3290,7 @@ export default function PosPage() {
         cart,
         setCart,
     ] = useState<
-        PosCartItem[]
+        PosCartItemWithCost[]
     >(
         initialDraft.cart,
     );
@@ -3725,6 +3786,41 @@ export default function PosPage() {
             [cart],
         );
 
+    /*
+     * Purchase cost of everything selected in this cart.
+     * No cost information is sent in completePosSale().
+     * Missing costs (e.g. previously saved drafts) are NOT treated
+     * as zero, to avoid showing a misleading financial total.
+     */
+    const selectedPurchaseCost = useMemo(
+        () => {
+            let total = 0;
+            let missingItems = 0;
+
+            for (const item of cart) {
+                const unitCost = item.purchase_cost;
+
+                if (
+                    unitCost === null
+                    || unitCost === undefined
+                    || !Number.isFinite(unitCost)
+                    || unitCost < 0
+                ) {
+                    missingItems += 1;
+                    continue;
+                }
+
+                total += Number(item.quantity) * unitCost;
+            }
+
+            return {
+                total: Math.round(total * 100) / 100,
+                missingItems,
+            };
+        },
+        [cart],
+    );
+
     const saleDiscountValue =
         Number(
             saleDiscount || 0,
@@ -3815,6 +3911,12 @@ export default function PosPage() {
                 ?? saleOption
                     .conversion_factor
                 ?? 1,
+            );
+
+        const selectedUnitPurchaseCost =
+            getSelectedUnitPurchaseCost(
+                saleOption,
+                batch,
             );
 
         const existingItem =
@@ -3924,6 +4026,11 @@ export default function PosPage() {
 
                                     stock_quantity:
                                         newLineStockQuantity,
+
+                                    purchase_cost:
+                                        selectedUnitPurchaseCost
+                                        ?? item.purchase_cost
+                                        ?? null,
                                 }
                                 : item,
                     ),
@@ -3997,6 +4104,10 @@ export default function PosPage() {
                                     saleOption
                                         .selling_price,
                                 ),
+
+                            // The purchase cost of one selected sale unit.
+                            purchase_cost:
+                                selectedUnitPurchaseCost,
 
                             quantity:
                                 normaliseQuantity(
@@ -5370,6 +5481,29 @@ export default function PosPage() {
                             )}
                         </strong>
                     </div>
+
+                    <div className="summary-row cart-cost-row">
+                        <span>
+                            Total Purchase Cost (Selected Items)
+                        </span>
+
+                        <strong>
+                            {selectedPurchaseCost.missingItems === 0
+                                ? currencyFormatter.format(
+                                    selectedPurchaseCost.total,
+                                )
+                                : 'Cost unavailable'}
+                        </strong>
+                    </div>
+
+                    {selectedPurchaseCost.missingItems > 0 && (
+                        <p className="cart-cost-note">
+                            Purchase cost is missing for{' '}
+                            {selectedPurchaseCost.missingItems}{' '}
+                            item(s), possibly restored from an older draft.
+                            Remove and re-add those items to refresh their costs.
+                        </p>
+                    )}
 
                     <div className="summary-row">
                         <span>
