@@ -81,8 +81,8 @@ declare global {
 }
 
 
-const SOFTWARE_CREDIT =
-    'Software by Geesara Software & Solutions | 078-457-6990';
+// const SOFTWARE_CREDIT =
+//     'Software by Geesara Software & Solutions | 078-457-6990';
 
 interface SaleReceiptModalProps {
     receipt: SaleReceipt | null;
@@ -2014,9 +2014,9 @@ function ThermalReceipt({
                 </footer>
             )}
 
-            <div className="thermal-software-credit">
+            {/* <div className="thermal-software-credit">
                 {SOFTWARE_CREDIT}
-            </div>
+            </div> */}
         </article>
     );
 }
@@ -4410,8 +4410,8 @@ export default function SaleReceiptModal({
                             ? settings.receipt_footer
                             : 'Thank you for your business.',
 
-                    softwareCredit:
-                        SOFTWARE_CREDIT,
+                    // softwareCredit:
+                    //     SOFTWARE_CREDIT,
 
                     copies: Math.max(
                         1,

@@ -79,6 +79,7 @@ export interface AdminDashboardSummary {
   today_expenses: number;
   today_return_refund: number;
   today_gross_profit: number;
+  today_gross_cost: number;
   today_net_profit: number;
   stock_quantity: number;
   stock_purchase_value: number;

@@ -2938,6 +2938,23 @@ export default function AdminDashboardPage() {
 
                     <article className="agro-metric-card">
                         <span className="agro-metric-label">
+                            Gross Cost Today
+                        </span>
+
+                        <strong className="agro-metric-value">
+                            {currencyFormatter.format(
+                                summary
+                                    .today_gross_cost,
+                            )}
+                        </strong>
+
+                        <span className="agro-metric-sub">
+                            Cost of goods sold before returns
+                        </span>
+                    </article>
+
+                    <article className="agro-metric-card">
+                        <span className="agro-metric-label">
                             Net Profit Today
                         </span>
 

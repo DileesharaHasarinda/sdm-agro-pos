@@ -100,6 +100,15 @@ class DashboardController extends Controller
                 ->sum('gross_profit')
             );
 
+        // Cost of goods sold for today's sales, using the existing
+        // sales revenue and stored gross-profit accounting values.
+        // Returns are managed separately by the existing return logic.
+        $todayGrossCost =
+            round(
+                $todaySalesTotal - $todayGrossProfit,
+                2,
+            );
+
         $todaySaleNetProfit =
             (float) (
                 (clone $todaySalesQuery)
@@ -632,6 +641,9 @@ class DashboardController extends Controller
 
                     'today_gross_profit' =>
                     $todayGrossProfit,
+
+                    'today_gross_cost' =>
+                    $todayGrossCost,
 
                     'today_net_profit' =>
                     $todayNetProfit,
