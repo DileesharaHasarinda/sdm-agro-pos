@@ -1,7 +1,6 @@
 import {
     useCallback,
     useEffect,
-    useMemo,
     useRef,
     useState,
 } from 'react';
@@ -19,12 +18,16 @@ import {
 } from '../../lib/api';
 
 import {
+    enableLooseStockBatch,
     getStockProducts,
+    writeOffStockBatch,
 } from '../../services/stockService';
 
 import type {
+    StockBatchOption,
     StockPaginationMeta,
     StockProduct,
+    StockWriteOffReason,
 } from '../../types/stock';
 
 const currencyFormatter =
@@ -241,44 +244,36 @@ function expiryStatus(
         return 'none';
     }
 
-    const expiryDate =
-        new Date(
-            `${value.substring(
-                0,
-                10,
-            )}T23:59:59`,
-        );
-
-    if (
-        Number.isNaN(
-            expiryDate.getTime(),
-        )
-    ) {
+    const expiryDay = new Date(`${value.substring(0, 10)}T00:00:00`);
+    if (Number.isNaN(expiryDay.getTime())) {
         return 'none';
     }
 
-    const daysRemaining =
-        Math.ceil(
-            (
-                expiryDate.getTime()
-                - new Date().getTime()
-            )
-            / 86_400_000,
-        );
+    const currentDay = new Date();
+    currentDay.setHours(0, 0, 0, 0);
 
-    if (
-        daysRemaining < 0
-    ) {
+    if (expiryDay.getTime() < currentDay.getTime()) {
         return 'expired';
     }
 
-    if (
-        daysRemaining <= 30
-    ) {
-        return 'soon';
-    }
+    const daysRemaining = Math.round(
+        (expiryDay.getTime() - currentDay.getTime()) / 86_400_000,
+    );
+    return daysRemaining <= 30 ? 'soon' : 'normal';
+}
 
-    return 'normal';
+function formatBatchStockSummary(
+    batches: StockBatchOption[],
+    defaultUnit: string,
+): string {
+    const totals = new Map<string, number>();
+    for (const batch of batches) {
+        const unit = batch.stock_unit || defaultUnit;
+        totals.set(unit, (totals.get(unit) ?? 0) + numberValue(batch.available_quantity));
+    }
+    return Array.from(totals.entries())
+        .map(([unit, quantity]) => `${formatQuantity(quantity)} ${unit}`)
+        .join(' + ');
 }
 
 const inventoryStyles = `
@@ -1293,6 +1288,97 @@ const inventoryStyles = `
 }
 
 /* =========================================================
+   ADMIN BATCH CORRECTION ACTIONS
+   ========================================================= */
+#inventory-details-modal .idm-batch-tools {
+    display: grid !important;
+    gap: 9px !important;
+    padding: 12px !important;
+    background: #f8faf9 !important;
+    border-top: 1px solid #e5eae6 !important;
+}
+#inventory-details-modal .idm-batch-tool {
+    display: flex !important;
+    gap: 10px !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    flex-wrap: wrap !important;
+    font-size: 12px !important;
+}
+#inventory-details-modal .idm-batch-tool-actions {
+    display: flex !important;
+    gap: 8px !important;
+    flex-wrap: wrap !important;
+}
+#inventory-details-modal .idm-action-button {
+    display: inline-flex !important;
+    padding: 6px 10px !important;
+    color: #175cd3 !important;
+    background: #eff8ff !important;
+    border: 1px solid #bfdbfe !important;
+    border-radius: 7px !important;
+    cursor: pointer !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+}
+#inventory-details-modal .idm-action-button.danger {
+    color: #b42318 !important;
+    background: #fef3f2 !important;
+    border-color: #f3b5af !important;
+}
+#inventory-details-modal .idm-action-button:disabled {
+    opacity: 0.5 !important;
+    cursor: not-allowed !important;
+}
+#inventory-details-modal .idm-action-form {
+    display: grid !important;
+    gap: 11px !important;
+    padding: 15px !important;
+    background: #fffbeb !important;
+    border: 1px solid #f0d48f !important;
+    border-radius: 10px !important;
+}
+#inventory-details-modal .idm-action-form h3 {
+    color: #7a2e0e !important;
+    font-size: 16px !important;
+}
+#inventory-details-modal .idm-action-form label {
+    display: grid !important;
+    gap: 5px !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+}
+#inventory-details-modal .idm-action-form input,
+#inventory-details-modal .idm-action-form select,
+#inventory-details-modal .idm-action-form textarea {
+    width: 100% !important;
+    padding: 8px 10px !important;
+    color: #101828 !important;
+    border: 1px solid #d0d9d2 !important;
+    border-radius: 6px !important;
+    background: #ffffff !important;
+    font: inherit !important;
+}
+#inventory-details-modal .idm-action-error {
+    padding: 10px !important;
+    color: #b42318 !important;
+    background: #fef3f2 !important;
+    border-radius: 6px !important;
+}
+#inventory-details-modal .idm-action-controls {
+    display: flex !important;
+    gap: 9px !important;
+    flex-wrap: wrap !important;
+}
+#inventory-page .inv-success {
+    padding: 10px 12px !important;
+    color: #14532d !important;
+    background: #f0fdf4 !important;
+    border: 1px solid #86efac !important;
+    border-radius: 8px !important;
+}
+
+/* =========================================================
    RESPONSIVE
    ========================================================= */
 
@@ -1499,7 +1585,10 @@ const inventoryStyles = `
 export default function InventoryPage() {
     const {
         token,
+        user,
     } = useAuth();
+
+    const canManageInventory = user?.role === 'admin';
 
     const searchInputRef =
         useRef<HTMLInputElement | null>(
@@ -1587,25 +1676,38 @@ export default function InventoryPage() {
             '',
         );
 
-    const visibleStockTotal =
-        useMemo(
-            () =>
-                products.reduce(
-                    (
-                        total,
-                        product,
-                    ) =>
-                        total
-                        + numberValue(
-                            product
-                                .total_available_quantity,
-                        ),
-                    0,
-                ),
-            [
-                products,
-            ],
+    const [batchAction, setBatchAction] = useState<{
+        mode: 'write_off' | 'enable_loose';
+        batch: StockBatchOption;
+    } | null>(null);
+
+    const [writeOffReason, setWriteOffReason] =
+        useState<StockWriteOffReason>('expired');
+    const [actionNotes, setActionNotes] = useState('');
+    const [confirmation, setConfirmation] = useState('');
+    const [bagWeight, setBagWeight] = useState('50');
+    const [loosePrice, setLoosePrice] = useState('');
+    const [actionError, setActionError] = useState('');
+    const [actionBusy, setActionBusy] = useState(false);
+    const [successMessage, setSuccessMessage] = useState('');
+
+    const openBatchAction = (
+        mode: 'write_off' | 'enable_loose',
+        batch: StockBatchOption,
+    ): void => {
+        setBatchAction({ mode, batch });
+        setWriteOffReason(
+            expiryStatus(batch.expiry_date) === 'expired'
+                ? 'expired' : 'incorrect_entry',
         );
+        setActionNotes('');
+        setConfirmation('');
+        setBagWeight('50');
+        setLoosePrice('');
+        setActionError('');
+        setSuccessMessage('');
+    };
+
 
     const loadStock =
         useCallback(
@@ -1692,6 +1794,58 @@ export default function InventoryPage() {
             ],
         );
 
+    const submitBatchAction = async (): Promise<void> => {
+        if (!token || !canManageInventory || !batchAction || actionBusy) {
+            return;
+        }
+
+        if (actionNotes.trim().length < 5) {
+            setActionError('Enter a reason with at least 5 characters.');
+            return;
+        }
+
+        if (batchAction.mode === 'write_off' && confirmation !== 'WRITE OFF') {
+            setActionError('Type WRITE OFF exactly to confirm removing the remaining stock.');
+            return;
+        }
+
+        if (batchAction.mode === 'enable_loose' && (
+            !Number.isFinite(Number(bagWeight)) || Number(bagWeight) <= 0 ||
+            !Number.isFinite(Number(loosePrice)) || Number(loosePrice) <= 0
+        )) {
+            setActionError('Enter a valid Kg-per-Bag factor and loose selling price.');
+            return;
+        }
+
+        setActionBusy(true);
+        setActionError('');
+        try {
+            const result = batchAction.mode === 'write_off'
+                ? await writeOffStockBatch(token, batchAction.batch.id, {
+                    reason: writeOffReason,
+                    notes: actionNotes.trim(),
+                })
+                : await enableLooseStockBatch(token, batchAction.batch.id, {
+                    conversion_factor: Number(bagWeight),
+                    secondary_selling_price: Number(loosePrice),
+                    reason: actionNotes.trim(),
+                });
+
+            setSuccessMessage(result.message);
+            setBatchAction(null);
+            setSelectedProduct(null);
+            await loadStock();
+        } catch (error) {
+            setActionError(
+                error instanceof ApiError
+                    ? error.message
+                    : 'Unable to complete this inventory action.',
+            );
+        } finally {
+            setActionBusy(false);
+        }
+    };
+
     useEffect(
         () => {
             void loadStock();
@@ -1747,6 +1901,7 @@ export default function InventoryPage() {
                 setSelectedProduct(
                     null,
                 );
+                setBatchAction(null);
             }
         },
         [
@@ -1902,6 +2057,130 @@ export default function InventoryPage() {
                             </header>
 
                             <div className="idm-body">
+                                {canManageInventory && batchAction && (
+                                    <form
+                                        className="idm-action-form"
+                                        onSubmit={(event) => {
+                                            event.preventDefault();
+                                            void submitBatchAction();
+                                        }}
+                                    >
+                                        <h3>
+                                            {batchAction.mode === 'write_off'
+                                                ? 'Write off remaining batch stock'
+                                                : 'Correct batch: Enable loose Kg selling'}
+                                        </h3>
+                                        <p>
+                                            <strong>{batchAction.batch.batch_number
+                                                || batchAction.batch.batch_code
+                                                || `Stock #${batchAction.batch.id}`}</strong>
+                                            {' — '}
+                                            {formatQuantity(batchAction.batch.available_quantity)}
+                                            {' '}
+                                            {batchAction.batch.stock_unit || selectedProduct.unit}
+                                        </p>
+                                        {batchAction.mode === 'write_off' ? (
+                                            <>
+                                                <p>
+                                                    This sets available stock to zero and records an
+                                                    auditable adjustment. Purchase and sales history
+                                                    will NOT be deleted.
+                                                </p>
+                                                <label>
+                                                    Write-off reason
+                                                    <select
+                                                        value={writeOffReason}
+                                                        onChange={(event) => setWriteOffReason(
+                                                            event.target.value as StockWriteOffReason,
+                                                        )}
+                                                    >
+                                                        <option value="expired">Expired stock</option>
+                                                        <option value="damaged">Damaged / unsellable</option>
+                                                        <option value="incorrect_entry">Incorrect stock receipt</option>
+                                                        <option value="other">Other</option>
+                                                    </select>
+                                                </label>
+                                                <label>
+                                                    Type WRITE OFF to confirm
+                                                    <input
+                                                        value={confirmation}
+                                                        autoComplete="off"
+                                                        onChange={(event) => setConfirmation(event.target.value)}
+                                                        placeholder="WRITE OFF"
+                                                        required
+                                                    />
+                                                </label>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <p>
+                                                    Only untouched Bag batches can be converted.
+                                                    Original purchase quantity and cost remain unchanged.
+                                                </p>
+                                                <label>
+                                                    Weight of one Bag (Kg)
+                                                    <input
+                                                        type="number"
+                                                        min="0.001"
+                                                        step="0.001"
+                                                        value={bagWeight}
+                                                        onChange={(event) => setBagWeight(event.target.value)}
+                                                        required
+                                                    />
+                                                </label>
+                                                <label>
+                                                    Loose selling price per Kg (Rs.)
+                                                    <input
+                                                        type="number"
+                                                        min="0.01"
+                                                        step="0.01"
+                                                        value={loosePrice}
+                                                        onChange={(event) => setLoosePrice(event.target.value)}
+                                                        required
+                                                    />
+                                                </label>
+                                            </>
+                                        )}
+                                        <label>
+                                            Reason / explanation (required)
+                                            <textarea
+                                                rows={3}
+                                                maxLength={180}
+                                                value={actionNotes}
+                                                onChange={(event) => setActionNotes(event.target.value)}
+                                                placeholder="Explain why you are correcting this stock batch"
+                                                required
+                                            />
+                                        </label>
+                                        {actionError && (
+                                            <p className="idm-action-error" role="alert">
+                                                {actionError}
+                                            </p>
+                                        )}
+                                        <div className="idm-action-controls">
+                                            <button
+                                                type="submit"
+                                                disabled={actionBusy}
+                                                className={`idm-action-button ${
+                                                    batchAction.mode === 'write_off' ? 'danger' : ''
+                                                }`}
+                                            >
+                                                {actionBusy ? 'Processing...' :
+                                                    batchAction.mode === 'write_off'
+                                                        ? 'Confirm write-off'
+                                                        : 'Enable Bag + Kg'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="idm-footer-button"
+                                                disabled={actionBusy}
+                                                onClick={() => setBatchAction(null)}
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </form>
+                                )}
                                 <div className="idm-overview">
                                     <div className="idm-overview-card">
                                         <span>
@@ -1926,12 +2205,8 @@ export default function InventoryPage() {
                                         </span>
 
                                         <strong>
-                                            {formatQuantity(
-                                                selectedProduct
-                                                    .total_available_quantity,
-                                            )}
-                                            {' '}
-                                            {selectedProduct.unit}
+                                            {selectedProduct.stock_summary
+                                                || `${formatQuantity(selectedProduct.total_available_quantity)} ${selectedProduct.unit}`}
                                         </strong>
                                     </div>
 
@@ -2018,12 +2293,10 @@ export default function InventoryPage() {
                                                                     </span>
 
                                                                     <strong>
-                                                                        {formatQuantity(
-                                                                            priceOption
-                                                                                .available_quantity,
+                                                                        {formatBatchStockSummary(
+                                                                            priceOption.batches,
+                                                                            selectedProduct.unit,
                                                                         )}
-                                                                        {' '}
-                                                                        {selectedProduct.unit}
                                                                     </strong>
                                                                 </div>
                                                             </div>
@@ -2100,7 +2373,7 @@ export default function InventoryPage() {
                                                                                                                 .available_quantity,
                                                                                                         )}
                                                                                                         {' '}
-                                                                                                        {selectedProduct.unit}
+                                                                                                        {batch.stock_unit || selectedProduct.unit}
                                                                                                     </td>
 
                                                                                                     <td>
@@ -2161,7 +2434,7 @@ export default function InventoryPage() {
                                                                                                         .available_quantity,
                                                                                                 )}
                                                                                                 {' '}
-                                                                                                {selectedProduct.unit}
+                                                                                                {batch.stock_unit || selectedProduct.unit}
                                                                                             </strong>
                                                                                         </div>
 
@@ -2181,6 +2454,43 @@ export default function InventoryPage() {
                                                                                 ),
                                                                             )}
                                                                     </div>
+                                                                    {canManageInventory && (
+                                                                        <div className="idm-batch-tools">
+                                                                            {priceOption.batches.map((batch) => (
+                                                                                <div className="idm-batch-tool" key={batch.id}>
+                                                                                    <span>
+                                                                                        <strong>{batch.batch_number
+                                                                                            || batch.batch_code
+                                                                                            || `Stock #${batch.id}`}</strong>
+                                                                                        {' · '}
+                                                                                        {formatQuantity(batch.available_quantity)}
+                                                                                        {' '}
+                                                                                        {batch.stock_unit || selectedProduct.unit}
+                                                                                    </span>
+                                                                                    <span className="idm-batch-tool-actions">
+                                                                                        {selectedProduct.unit.trim().toLowerCase() === 'bag'
+                                                                                            && !batch.is_dual_unit
+                                                                                            && batch.purchase_item_id != null && (
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                className="idm-action-button"
+                                                                                                onClick={() => openBatchAction('enable_loose', batch)}
+                                                                                            >
+                                                                                                Enable Loose Kg
+                                                                                            </button>
+                                                                                        )}
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            className="idm-action-button danger"
+                                                                                            onClick={() => openBatchAction('write_off', batch)}
+                                                                                        >
+                                                                                            Write Off Stock
+                                                                                        </button>
+                                                                                    </span>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
                                                                 </>
                                                             )}
                                                         </article>
@@ -2249,6 +2559,12 @@ export default function InventoryPage() {
                         </span>
                     </div>
                 </header>
+
+                {successMessage && (
+                    <div className="inv-success" role="status">
+                        {successMessage}
+                    </div>
+                )}
 
                 {errorMessage && (
                     <div
@@ -2458,12 +2774,8 @@ export default function InventoryPage() {
 
                                                 <td data-label="Available Stock">
                                                     <strong className="inv-stock-value">
-                                                        {formatQuantity(
-                                                            product
-                                                                .total_available_quantity,
-                                                        )}
-                                                        {' '}
-                                                        {product.unit}
+                                                        {product.stock_summary
+                                                            || `${formatQuantity(product.total_available_quantity)} ${product.unit}`}
                                                     </strong>
                                                 </td>
 
@@ -2546,11 +2858,9 @@ export default function InventoryPage() {
                                     ·
                                     {' '}
 
-                                    {formatQuantity(
-                                        visibleStockTotal,
-                                    )}
+                                    {products.length}
                                     {' '}
-                                    visible stock
+                                    products on this page
                                 </span>
 
                                 <button

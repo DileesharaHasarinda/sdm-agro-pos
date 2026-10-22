@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\DatabaseBackupController;
 use App\Http\Controllers\Api\ExpenseCategoryController;
 use App\Http\Controllers\Api\ExpenseController;
 use App\Http\Controllers\Api\InventoryAlertController;
+use App\Http\Controllers\Api\InventoryBatchActionController;
 use App\Http\Controllers\Api\PosController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\PurchaseController;
@@ -600,6 +601,17 @@ Route::prefix('v1')
                         StockBatchController::class,
                         'update',
                     ],
+                );
+
+                /* SAFE INVENTORY ACTIONS (ADMIN ONLY) */
+                Route::post(
+                    '/stock-batches/{stockBatch}/write-off',
+                    [InventoryBatchActionController::class, 'writeOff'],
+                );
+
+                Route::post(
+                    '/stock-batches/{stockBatch}/enable-loose',
+                    [InventoryBatchActionController::class, 'enableLoose'],
                 );
 
                 /* CORE ADMIN RESOURCES */
